@@ -103,6 +103,14 @@ if [[ -s "$DC" ]]; then
         rm -f "$OUT/axfr_${dc}.txt"
       fi
     fi
+
+    # Richer DNS enumeration (std records, SRV, AXFR) against this DC/DNS.
+    if have dnsrecon && [[ -n "$dom" ]]; then
+      log "dnsrecon (std + SRV + axfr): $dom @ $dc"
+      dnsrecon -n "$dc" -d "$dom" -t std,srv,axfr -j "$OUT/dnsrecon_${dc}.json" \
+        >>"$LOG" 2>&1 || true
+      [[ -s "$OUT/dnsrecon_${dc}.json" ]] && ok "dnsrecon -> $OUT/dnsrecon_${dc}.json"
+    fi
   done < "$DC"
   [[ -s "$RUN/domain_users.txt" ]] && sort -u -o "$RUN/domain_users.txt" "$RUN/domain_users.txt"
 

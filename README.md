@@ -76,14 +76,14 @@ cedzo/
 ├── 00-prep.sh           # ✅  preflight: validate scope → live_hosts.txt
 ├── 02-portscan.sh       # 📡  full TCP + top UDP, -sCV, role classification (+NFS)
 ├── 03-enum-smb-ad.sh    # 🪟  SMB/LDAP/shares/RID, GPP cpassword, share spider,
-│                        #      anon-LDAP dump, DNS AXFR, NFS export enum
+│                        #      anon-LDAP dump, DNS AXFR + dnsrecon, NFS export enum
 ├── 04-enum-web.sh       # 🌐  httpx, whatweb, gowitness, katana+feroxbuster, nuclei,
-│                        #      exposure checks (.git/.env), favicon hash, wpscan
+│                        #      exposures, favicon, wpscan, NTLMRecon, shortscan
 ├── 05-enum-db.sh        # 🗄️   MSSQL/MySQL/PG/Oracle/Mongo/Redis enum (no brute)
-├── 06-ad-recon.sh       # 🎫  AS-REP/Kerberoast, BloodHound, ADCS/Certipy (RO creds)
+├── 06-ad-recon.sh       # 🎫  kerbrute userenum, AS-REP/Kerberoast, BloodHound, Certipy
 ├── 07-vuln-scan.sh      # 💥  MS17-010, SMBGhost, BlueKeep, Zerologon, PrintNightmare,
-│                        #      PetitPotam, log4j/proxyshell sweep, TLS, SNMP walk
-├── 08-report.sh         # 📊  Top-Risks rollup + REPORT.md + HTML reports
+│                        #      PetitPotam, log4j/proxyshell sweep, testssl.sh, SNMP walk
+├── 08-report.sh         # 📊  noseyparker secrets + Top-Risks rollup + REPORT.md + HTML
 └── reporting/
     ├── urlfilter.py     # 🧹  consolidate + de-noise crawled URLs → nuclei targets
     ├── nmap2html.py     # 🖥️   infrastructure intel report (risk scoring)
@@ -99,11 +99,12 @@ cedzo/
 
 | Area | Checks &nbsp;·&nbsp; *(all read-only / non-exploitative)* |
 |------|------------------------------------------------------------|
-| 🎫 **Active Directory** | RID-brute user harvest, password policy, anonymous LDAP dump, **GPP cpassword (SYSVOL)**, **DNS AXFR**, AS-REP/Kerberoast collection, BloodHound, **ADCS template misconfigs (Certipy, ESC1–ESC8)** |
+| 🎫 **Active Directory** | RID-brute user harvest, password policy, anonymous LDAP dump, **GPP cpassword (SYSVOL)**, **DNS AXFR + dnsrecon**, **kerbrute userenum** (validate users, no spray), AS-REP/Kerberoast collection, BloodHound, **ADCS template misconfigs (Certipy, ESC1–ESC8)** |
 | 📁 **File services** | SMB share enum + **sensitive-file spider** (index only), **NFS exports** + read-only top-level listing |
-| 🌐 **Web** | httpx/whatweb fingerprint, gowitness, katana crawl + feroxbuster, **exposure checks (.git/.svn/.env/backups/status)**, **favicon mmh3 hash**, **WordPress deep-scan**, nuclei |
-| 💥 **Vulns (detect)** | MS17-010, **SMBGhost**, **BlueKeep**, Zerologon, PrintNightmare, PetitPotam, **log4j / ProxyShell / ProxyLogon / Spring4Shell sweep**, SMB signing, TLS hygiene, **SNMP default-community + walk** |
+| 🌐 **Web** | httpx/whatweb fingerprint, gowitness, katana crawl + feroxbuster, **exposure checks (.git/.svn/.env/backups/status)**, **favicon mmh3 hash**, **WordPress deep-scan**, **NTLMRecon** (internal AD leak), **shortscan** (IIS 8.3), CMSeeK *(opt)*, nuclei |
+| 💥 **Vulns (detect)** | MS17-010, **SMBGhost**, **BlueKeep**, Zerologon, PrintNightmare, PetitPotam, **log4j / ProxyShell / ProxyLogon / Spring4Shell sweep**, SMB signing, **TLS hygiene (testssl.sh)**, **SNMP default-community + walk** |
 | 🗄️ **Databases** | version / empty-password / config NSE for MSSQL · MySQL · PostgreSQL · Oracle · Mongo · Redis |
+| 🔑 **Secrets** | **noseyparker** secret-scan over all collected loot (exposures, AXFR/LDAP dumps, NFS listings) |
 | 📊 **Reporting** | **prioritised Top-Risks rollup (finding IDs + severity)**, Markdown report, HTML infra + web reports |
 
 ---

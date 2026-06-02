@@ -70,12 +70,21 @@ if [[ -s "$RUN/web_urls.txt" ]] && have nuclei; then
 fi
 
 # ---- SSL/TLS hygiene ------------------------------------------------------
-if [[ -s "$RUN/web_urls.txt" ]] && have nmap; then
-  log "TLS cipher/cert audit on HTTPS services"
+# Prefer testssl.sh (protocols, ciphers, cert, BEAST/ROBOT/Heartbleed
+# detection); fall back to nmap NSE when testssl is unavailable.
+TESTSSL=""; have testssl.sh && TESTSSL=testssl.sh || { have testssl && TESTSSL=testssl; }
+if [[ -s "$RUN/web_urls.txt" ]]; then
+  log "TLS audit on HTTPS services${TESTSSL:+ (testssl.sh)}"
   grep '^https' "$RUN/web_urls.txt" | sed 's#https://##' | while read -r hostport; do
     h=${hostport%%:*}; p=${hostport##*:}; [[ "$p" == "$h" ]] && p=443
-    sudo nmap -Pn -p"$p" --script "ssl-enum-ciphers,ssl-cert,ssl-dh-params" "$h" \
-      >>"$OUT/tls_audit.txt" 2>/dev/null || true
+    safe=$(sed 's#[^A-Za-z0-9]#_#g' <<<"${h}_${p}")
+    if [[ -n "$TESTSSL" ]]; then
+      "$TESTSSL" --quiet --color 0 --warnings off --severity LOW \
+        --jsonfile "$OUT/testssl_$safe.json" "$h:$p" >>"$OUT/tls_audit.txt" 2>/dev/null || true
+    elif have nmap; then
+      sudo nmap -Pn -p"$p" --script "ssl-enum-ciphers,ssl-cert,ssl-dh-params" "$h" \
+        >>"$OUT/tls_audit.txt" 2>/dev/null || true
+    fi
   done
   ok "TLS audit -> $OUT/tls_audit.txt"
 fi

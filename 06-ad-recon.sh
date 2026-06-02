@@ -25,6 +25,19 @@ DC1=$(head -1 "$DC"); [[ -n "$DC_IP" ]] && DC1="$DC_IP"
 USERS="$RUN/domain_users.txt"
 [[ -s "$USERS" ]] || USERS="$USER_WORDLIST"
 
+# ---- Username validation via Kerberos pre-auth (kerbrute userenum) --------
+# Sends AS-REQ and reads the KDC error to confirm which names exist. This is
+# enumeration only — no passwords are tried, so it cannot lock accounts.
+if have kerbrute && [[ -s "$USERS" && -n "$DOMAIN" ]]; then
+  log "kerbrute userenum (validate usernames; no password attempts)"
+  kerbrute userenum --dc "$DC1" -d "$DOMAIN" "$USERS" -o "$OUT/kerbrute_valid.txt" 2>/dev/null || true
+  if [[ -s "$OUT/kerbrute_valid.txt" ]]; then
+    grep -oiE '[A-Za-z0-9._-]+@'"$DOMAIN" "$OUT/kerbrute_valid.txt" | sed "s/@.*//" \
+      | sort -u > "$OUT/valid_users.txt" 2>/dev/null || true
+    [[ -s "$OUT/valid_users.txt" ]] && { USERS="$OUT/valid_users.txt"; ok "Validated $(wc -l <"$USERS") usernames -> $USERS"; }
+  fi
+fi
+
 # ---- AS-REP roasting (no creds needed; users w/ pre-auth disabled) --------
 # Requests AS-REP for accounts that don't require Kerberos pre-auth. This is a
 # directory query, not an authentication attempt — it does not touch lockout.

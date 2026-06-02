@@ -38,6 +38,11 @@ TOOLS=(
   "wpscan:wpscan:"
   "ffuf:ffuf:"
   "curl:curl:"
+  "testssl.sh:testssl:"
+  "dnsrecon:dnsrecon:"
+  "ntlmrecon:ntlmrecon:"
+  "shortscan:shortscan:"
+  "noseyparker:noseyparker:"
 )
 
 MISSING=()

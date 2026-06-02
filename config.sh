@@ -53,3 +53,7 @@ NFS_MOUNT="${NFS_MOUNT:-true}"          # read-only mount NFS exports to list to
 # --- vhost discovery (optional) --------------------------------------------
 # Set a wordlist to enable ffuf vhost brute against web hosts (uses $DOMAIN).
 VHOST_WORDLIST="${VHOST_WORDLIST:-}"
+
+# --- Extra recon engines (from the tool arsenal) ---------------------------
+WEB_CMS="${WEB_CMS:-false}"            # CMSeeK CMS enumeration in the web phase
+SECRET_SCAN="${SECRET_SCAN:-true}"     # noseyparker secret-scan over collected loot (phase 08)

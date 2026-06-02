@@ -13,6 +13,17 @@ REPORT="$RUN/REPORT.md"
 
 phase "Consolidated Reporting"
 
+# ---- Secret scan over collected loot (noseyparker) ------------------------
+# Scans everything this run collected (exposure dumps, AXFR/LDAP output, NFS
+# listings, share indexes) for hardcoded secrets/keys. Runs before the rollup
+# so any hit can be promoted into the Top-Risks table below.
+if [[ "${SECRET_SCAN:-true}" == "true" ]] && have noseyparker; then
+  log "noseyparker secret scan over $RUN"
+  noseyparker scan --datastore "$RUN/.np_ds" "$RUN" >/dev/null 2>&1 || true
+  noseyparker report --datastore "$RUN/.np_ds" > "$RUN/secrets_report.txt" 2>/dev/null || true
+  [[ -s "$RUN/secrets_report.txt" ]] && warn "Potential secrets in loot -> $RUN/secrets_report.txt"
+fi
+
 # Helpers -------------------------------------------------------------------
 count() { [[ -s "$1" ]] && wc -l < "$1" | tr -d ' ' || echo 0; }   # lines in file or 0
 emit()  { printf '%s\n' "$*" >> "$REPORT"; }
@@ -99,6 +110,12 @@ fhit "$RUN/05-db/db_nse.nmap" 'empty.password|No password was|Login Success' \
   && risk HIGH "Database with empty/weak password" "$RUN/05-db/db_nse.nmap"
 [[ -s "$RUN/04-web/exposures.txt" ]] \
   && risk HIGH "Exposed sensitive web paths (.git/.env/backups/status)" "$RUN/04-web/exposures.txt"
+[[ -s "$RUN/secrets_report.txt" ]] \
+  && risk HIGH "Secrets detected in collected loot (noseyparker)" "$RUN/secrets_report.txt"
+gly "$RUN/03-smb-ad/dnsrecon_*.json" \
+  && risk MEDIUM "Internal DNS enumeration (records/SRV/AXFR via dnsrecon)" "$RUN/03-smb-ad/"
+[[ -s "$RUN/04-web/ntlmrecon.csv" || -s "$RUN/04-web/ntlmrecon.txt" ]] \
+  && risk MEDIUM "Internal AD info disclosed via NTLM endpoints" "$RUN/04-web/ntlmrecon.csv"
 
 # --- MEDIUM ---
 grep -rqiE 'message_signing: disabled' "$RUN/02-portscan/hosts"/*/service.nmap 2>/dev/null \
@@ -136,7 +153,11 @@ fi
 [[ -d "$RUN/04-web/screens" ]] && { emit ""; emit "Screenshots: \`$RUN/04-web/screens/\`"; }
 section_file "Exposed paths (.git/.env/backups/status)" "$RUN/04-web/exposures.txt"
 section_file "Favicon hashes (mmh3)" "$RUN/04-web/favicon.txt"
+section_file "IIS short-name disclosure (shortscan)" "$RUN/04-web/shortscan.txt"
 ls "$RUN/04-web"/wpscan_*.txt >/dev/null 2>&1 && { emit ""; emit "WordPress scans: \`$RUN/04-web/wpscan_*.txt\`"; }
+[[ -s "$RUN/04-web/ntlmrecon.csv" ]] && { emit ""; emit "NTLM endpoint recon: \`$RUN/04-web/ntlmrecon.csv\`"; }
+[[ -s "$RUN/04-web/ntlmrecon.txt" ]] && section_file "NTLM endpoint recon" "$RUN/04-web/ntlmrecon.txt"
+[[ -s "$RUN/04-web/cmseek.txt" ]] && { emit ""; emit "CMSeeK: \`$RUN/04-web/cmseek.txt\`"; }
 
 # SMB / AD enumeration ------------------------------------------------------
 emit ""; emit "## SMB / Active Directory"
@@ -149,6 +170,8 @@ section_file "GPP credentials (SYSVOL)" "$RUN/03-smb-ad/gpp_creds.txt"
 section_file "Sensitive files on shares" "$RUN/03-smb-ad/sensitive_files.txt"
 ls "$RUN/03-smb-ad"/ldap_anon_*.txt >/dev/null 2>&1 && { emit ""; emit "Anonymous LDAP dumps: \`$RUN/03-smb-ad/ldap_anon_*.txt\`"; }
 ls "$RUN/03-smb-ad"/axfr_*.txt >/dev/null 2>&1 && { emit ""; emit "DNS zone transfers: \`$RUN/03-smb-ad/axfr_*.txt\`"; }
+ls "$RUN/03-smb-ad"/dnsrecon_*.json >/dev/null 2>&1 && { emit ""; emit "dnsrecon output: \`$RUN/03-smb-ad/dnsrecon_*.json\`"; }
+section_file "Kerberos-validated usernames (kerbrute)" "$RUN/06-ad-recon/valid_users.txt"
 
 # NFS file services ---------------------------------------------------------
 if [[ -s "$RUN/03-smb-ad/nfs_exports.txt" ]]; then
@@ -182,6 +205,13 @@ emit "- AS-REP hashes collected: **$ar** (\`hashcat -m 18200\`)"
 [[ -s "$RUN/06-ad-recon/adcs_summary.txt" ]] && emit "- ADCS vulnerable templates: \`$RUN/06-ad-recon/adcs_summary.txt\` (Certipy)"
 emit ""
 section_file "ADCS vulnerable templates (Certipy)" "$RUN/06-ad-recon/adcs_summary.txt"
+
+# Secrets in collected loot ------------------------------------------------
+if [[ -s "$RUN/secrets_report.txt" ]]; then
+  emit ""; emit "## Secrets in Collected Loot (noseyparker)"
+  emit ""; emit "Detected in evidence this run collected — validate and rotate as needed."
+  section_file "noseyparker report" "$RUN/secrets_report.txt"
+fi
 
 emit "---"
 emit "_Recon-only engagement. All findings are observations or detections;"

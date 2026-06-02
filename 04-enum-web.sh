@@ -87,6 +87,32 @@ if have wpscan && [[ -s "$OUT/whatweb.txt" ]]; then
   [[ -n "$wpurls" ]] && ok "WordPress scans -> $OUT/wpscan_*.txt"
 fi
 
+# ---- NTLM endpoint recon (leaks internal AD domain/host/OS) ---------------
+if have ntlmrecon; then
+  log "NTLMRecon (extract internal AD domain/host/OS from NTLM challenges)"
+  ntlmrecon --infile "$LIVE_URLS" --outfile "$OUT/ntlmrecon.csv" --output csv 2>/dev/null \
+    || while read -r u; do ntlmrecon --input "$u" >> "$OUT/ntlmrecon.txt" 2>/dev/null || true; done < "$LIVE_URLS"
+  { [[ -s "$OUT/ntlmrecon.csv" ]] || [[ -s "$OUT/ntlmrecon.txt" ]]; } && ok "NTLM recon -> $OUT/ntlmrecon.*"
+fi
+
+# ---- IIS 8.3 short-name disclosure (shortscan) ----------------------------
+if have shortscan; then
+  log "shortscan (IIS tilde / 8.3 short-name enumeration)"
+  while read -r u; do
+    shortscan "$u" >> "$OUT/shortscan.txt" 2>/dev/null || true
+  done < "$LIVE_URLS"
+  grep -iE 'vulnerable|IIS short' "$OUT/shortscan.txt" 2>/dev/null && warn "IIS short-name disclosure -> $OUT/shortscan.txt" || true
+fi
+
+# ---- CMS enumeration (optional, CMSeeK) -----------------------------------
+if [[ "${WEB_CMS:-false}" == "true" ]] && have cmseek; then
+  log "CMSeeK CMS enumeration"
+  while read -r u; do
+    cmseek -u "$u" --batch >> "$OUT/cmseek.txt" 2>/dev/null || true
+  done < "$LIVE_URLS"
+  [[ -s "$OUT/cmseek.txt" ]] && ok "CMSeeK -> $OUT/cmseek.txt"
+fi
+
 # ---- Virtual-host discovery (optional: needs ffuf + VHOST_WORDLIST) -------
 if have ffuf && [[ -n "${VHOST_WORDLIST:-}" && -s "${VHOST_WORDLIST:-/nonexistent}" && -n "${DOMAIN:-}" ]]; then
   log "vhost discovery against ${DOMAIN}"
