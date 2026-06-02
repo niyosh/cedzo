@@ -15,16 +15,17 @@ URLS="$RUN/web_urls.txt"
 phase "Web Enumeration ($(wc -l <"$URLS") targets)"
 
 # ---- Probe + fingerprint --------------------------------------------------
+# Run httpx for fingerprint detail only (titles, tech, status). We deliberately
+# do NOT use httpx to filter the target list: it can silently drop slow-but-live
+# services (e.g. Tomcat on 8180), and nmap -sCV already confirmed these ports
+# speak HTTP. Trusting nmap keeps every discovered web port in scope.
 if have httpx; then
-  log "httpx: live check, titles, tech, status, redirects"
+  log "httpx: titles, tech, status, redirects"
   run "$LOG" httpx -silent -l "$URLS" \
     -title -tech-detect -status-code -server -web-server -location -ip \
     -o "$OUT/httpx.txt" || true
-  # keep only live URLs for the heavier steps
-  httpx -silent -l "$URLS" -o "$OUT/live_urls.txt" 2>/dev/null || cp "$URLS" "$OUT/live_urls.txt"
-else
-  cp "$URLS" "$OUT/live_urls.txt"
 fi
+cp "$URLS" "$OUT/live_urls.txt"
 LIVE_URLS="$OUT/live_urls.txt"
 
 if have whatweb; then
@@ -90,8 +91,10 @@ fi
 
 # ---- Vuln scan ------------------------------------------------------------
 if have nuclei; then
-  log "nuclei (auto templates, info+low+med+high+critical)"
-  run "$LOG" nuclei -l "$NUCLEI_TARGETS" -severity info,low,medium,high,critical \
+  log "nuclei (severity: ${NUCLEI_SEVERITY:-info,low,medium,high,critical})"
+  run "$LOG" nuclei -l "$NUCLEI_TARGETS" \
+    -severity "${NUCLEI_SEVERITY:-info,low,medium,high,critical}" \
+    -timeout "${NUCLEI_TIMEOUT:-10}" -retries 1 \
     -rl 150 -c 25 -o "$OUT/nuclei.txt" -stats 2>/dev/null || true
   ok "nuclei findings: $( [[ -f "$OUT/nuclei.txt" ]] && wc -l <"$OUT/nuclei.txt" || echo 0 )"
 fi

@@ -37,6 +37,12 @@ USER_WORDLIST="${USER_WORDLIST:-/usr/share/seclists/Usernames/xato-net-10-millio
 SKIP_UDP="${SKIP_UDP:-false}"           # UDP scans are slow; set true to skip
 SCREENSHOTS="${SCREENSHOTS:-true}"      # web screenshots via gowitness
 
-# --- Web crawling (katana + dirsearch, feeds nuclei) -----------------------
+# --- Web crawling (katana + feroxbuster, feeds nuclei) ---------------------
 WEB_CRAWL="${WEB_CRAWL:-true}"          # crawl + content-discover before nuclei
 KATANA_DEPTH="${KATANA_DEPTH:-2}"       # katana crawl depth (raise for deeper apps)
+
+# --- nuclei ----------------------------------------------------------------
+# 'info' templates are by far the noisiest and balloon scan time/requests.
+# Drop 'info,' here for much faster, higher-signal scans.
+NUCLEI_SEVERITY="${NUCLEI_SEVERITY:-info,low,medium,high,critical}"
+NUCLEI_TIMEOUT="${NUCLEI_TIMEOUT:-10}"  # per-request timeout (s); guards fragile hosts
