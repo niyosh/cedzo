@@ -1,91 +1,138 @@
 #!/usr/bin/env python3
 # ==========================================================================
-# urlfilter.py  -  Merge + prioritise crawled/brute-forced URLs.
+# urlfilter.py  -  Consolidate + de-noise crawled/brute-forced URLs.
 #
-# Consumes katana and/or dirsearch output, keeps the interesting endpoints
-# (good status codes, parameters, admin/login paths, dynamic extensions),
-# drops static assets and deep-crawl noise, dedupes, and writes a clean
-# target list suitable for feeding to nuclei.
+# Consumes katana (bare URLs) and feroxbuster/dirsearch (status-prefixed)
+# output, keeps the interesting endpoints, drops junk, and collapses
+# near-duplicates so nuclei gets a tight target list instead of thousands of
+# redundant URLs.
 #
-#   python3 urlfilter.py katana.txt dirsearch.txt -o filtered_urls.txt
+# De-noising performed:
+#   * drop non-absolute URLs (e.g. a bare "login.php")
+#   * drop static assets (by path extension, ignoring the query string)
+#   * drop Apache mod_autoindex column-sort links   (?C=...&O=...)
+#   * drop documentation/templated placeholder URLs (?get=BEANNAME&att=MYKEY)
+#   * status-filter feroxbuster/dirsearch lines to interesting codes
+#   * for katana bare URLs, keep only parameterised / dynamic / keyworded paths
+#     and drop deep-crawl noise
+#   * collapse duplicates by (scheme, host, path, sorted param NAMES) so that
+#     index.php?page=a, index.php?page=b, ... become a single representative
+#
+#   python3 urlfilter.py katana.txt ferox_*.txt -o filtered_urls.txt
 # ==========================================================================
 
 import argparse
-import hashlib
 import os
+import re
+from urllib.parse import urlsplit, parse_qsl
 
 STATIC_EXT = (
     ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
-    ".woff", ".woff2", ".webp", ".mp4", ".pdf", ".zip",
+    ".woff", ".woff2", ".webp", ".mp4", ".pdf", ".zip", ".map",
 )
-GOOD_CODES = {"200", "302", "401", "403"}
+# Interesting HTTP status codes from feroxbuster/dirsearch output.
+GOOD_CODES = {"200", "204", "301", "302", "307", "308", "401", "403", "405"}
 KEYWORDS = (
     "admin", "login", "console", "dashboard", "manager",
     "phpmyadmin", "api", "test", "dev", "config", "secure",
 )
 DYNAMIC_EXT = (".php", ".jsp", ".asp", ".aspx", ".do", ".action", ".json")
 
+# Runs of >=4 uppercase letters in the query usually mean a templated example
+# URL copied from docs (BEANNAME, MYATTRIBUTE, METHODNAME, NEWVALUE, ...).
+PLACEHOLDER_RE = re.compile(r"[A-Z]{4,}")
+MAX_DEPTH = 6  # max path segments for katana bare URLs
+
+
+def extract(line):
+    """Return (url, source) where source is 'status' or 'bare', or (None, None)."""
+    line = line.strip()
+    if not line:
+        return None, None
+    if line[0].isdigit():
+        # status-prefixed (feroxbuster / dirsearch)
+        parts = line.split()
+        if len(parts) < 2 or parts[0] not in GOOD_CODES:
+            return None, None
+        for tok in reversed(parts):
+            if tok.startswith(("http://", "https://")):
+                return tok, "status"
+        return None, None
+    if line.startswith(("http://", "https://")):
+        return line, "bare"
+    return None, None  # bare relative path -> not a usable target
+
+
+def is_junk(parts):
+    keys = {k for k, _ in parse_qsl(parts.query, keep_blank_values=True)}
+    # Apache directory-listing sort links: ?C=N;O=D etc.
+    if keys and keys <= {"C", "O"}:
+        return True
+    # templated/example placeholder URLs
+    if PLACEHOLDER_RE.search(parts.query):
+        return True
+    # static asset (check the path, not the whole URL with its query string)
+    if parts.path.lower().endswith(STATIC_EXT):
+        return True
+    return False
+
+
+def interesting_bare(url):
+    low = url.lower()
+    if "?" not in url and not any(k in low for k in KEYWORDS) and not low.endswith(DYNAMIC_EXT):
+        return False
+    if url.count("/") > MAX_DEPTH:
+        return False
+    return True
+
+
+def canonical_key(parts):
+    keys = tuple(sorted(k for k, _ in parse_qsl(parts.query, keep_blank_values=True)))
+    return (parts.scheme, parts.netloc, parts.path, keys)
+
 
 def filter_urls(files, outfile):
     seen = set()
-    kept = 0
+    kept = dropped = 0
 
     with open(outfile, "w", encoding="utf8") as out:
         for path in files:
             if not path or not os.path.exists(path):
                 continue
-
             with open(path, encoding="utf8", errors="ignore") as fh:
                 for line in fh:
-                    line = line.strip()
-                    if not line:
+                    url, source = extract(line)
+                    if url is None:
+                        continue
+                    url = url.split("#", 1)[0]  # drop fragment
+                    parts = urlsplit(url)
+
+                    if is_junk(parts):
+                        dropped += 1
+                        continue
+                    if source == "bare" and not interesting_bare(url):
+                        dropped += 1
                         continue
 
-                    # -------- dirsearch format: "200    1234B   http://..." --------
-                    if line[0].isdigit():
-                        parts = line.split()
-                        if len(parts) < 3:
-                            continue
-                        if parts[0] not in GOOD_CODES:
-                            continue
-                        url = parts[-1]
-
-                    # -------- katana format: a bare URL per line --------
-                    else:
-                        url = line
-                        low = url.lower()
-                        # keep only parameterised / interesting / dynamic endpoints
-                        if (
-                            "?" not in url
-                            and not any(k in low for k in KEYWORDS)
-                            and not low.endswith(DYNAMIC_EXT)
-                        ):
-                            continue
-                        # drop deep-crawl noise
-                        if url.count("/") > 6:
-                            continue
-
-                    if url.lower().endswith(STATIC_EXT):
+                    key = canonical_key(parts)
+                    if key in seen:
+                        dropped += 1
                         continue
-
-                    h = hashlib.sha1(url.encode()).hexdigest()
-                    if h in seen:
-                        continue
-                    seen.add(h)
+                    seen.add(key)
                     out.write(url + "\n")
                     kept += 1
 
-    return kept
+    return kept, dropped
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Merge and prioritise crawled URLs for scanning.")
-    ap.add_argument("files", nargs="+", help="katana / dirsearch output files")
+    ap = argparse.ArgumentParser(description="Consolidate and de-noise crawled URLs for scanning.")
+    ap.add_argument("files", nargs="+", help="katana / feroxbuster / dirsearch output files")
     ap.add_argument("-o", "--out", required=True, help="filtered URL list output")
     args = ap.parse_args()
 
-    kept = filter_urls(args.files, args.out)
-    print(f"[urlfilter] kept {kept} prioritised URLs -> {args.out}")
+    kept, dropped = filter_urls(args.files, args.out)
+    print(f"[urlfilter] kept {kept} prioritised URLs, dropped {dropped} junk/dup -> {args.out}")
 
 
 if __name__ == "__main__":

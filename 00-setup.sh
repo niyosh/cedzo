@@ -24,7 +24,6 @@ TOOLS=(
   "whatweb:whatweb:"
   "feroxbuster:feroxbuster:"
   "katana:katana:"
-  "dirsearch:dirsearch:"
   "gowitness:gowitness:"
   "kerbrute:kerbrute:"
   "bloodhound-python:bloodhound:bloodhound"

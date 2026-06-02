@@ -45,29 +45,45 @@ if [[ "$SCREENSHOTS" == "true" ]] && have gowitness; then
   ok "Screenshots -> $OUT/screens"
 fi
 
-# ---- Crawl + content discovery (katana + dirsearch) -----------------------
-# Crawl live web roots and brute-force common paths, then merge + prioritise
-# into a clean endpoint list that enriches the nuclei target set.
+# ---- Crawl + content discovery (katana + feroxbuster) ---------------------
+# Crawl live web roots (katana) and brute-force common paths (feroxbuster),
+# then consolidate + de-noise everything into a single prioritised endpoint
+# list that is fed to nuclei. All discovery runs BEFORE the vuln scan.
 NUCLEI_TARGETS="$LIVE_URLS"
 if [[ "${WEB_CRAWL:-true}" == "true" ]]; then
-  KATANA_OUT="$OUT/katana.txt"; DIRS_OUT="$OUT/dirsearch.txt"
+  KATANA_OUT="$OUT/katana.txt"
+
+  # 1) katana crawl (JS-aware)
   if have katana; then
     log "katana crawl (JS-aware, depth ${KATANA_DEPTH:-2})"
     run "$LOG" katana -list "$LIVE_URLS" -jc -d "${KATANA_DEPTH:-2}" -silent \
       -o "$KATANA_OUT" 2>/dev/null || true
   fi
-  if have dirsearch; then
-    log "dirsearch content discovery"
-    run "$LOG" dirsearch -l "$LIVE_URLS" --format plain -o "$DIRS_OUT" 2>/dev/null || true
+
+  # 2) feroxbuster content discovery (parallel, capped)
+  if have feroxbuster && [[ -s "$WEB_WORDLIST" ]]; then
+    ferox_one() {
+      local url="$1"
+      local safe; safe=$(sed 's#[^A-Za-z0-9]#_#g' <<<"$url")
+      feroxbuster -u "$url" -w "$WEB_WORDLIST" -q -k -t 20 \
+        -x php,asp,aspx,jsp,html,txt,bak,config \
+        --no-recursion -o "$OUT/ferox_$safe.txt" 2>/dev/null || true
+      printf '%s[+]%s dirbust %s\n' "$C_GRN" "$C_RST" "$url"
+    }
+    export -f ferox_one; export OUT WEB_WORDLIST C_GRN C_RST
+    log "feroxbuster content discovery (parallel, capped)"
+    THREADS_WEB=$(( THREADS<6 ? THREADS : 6 ))   # don't hammer
+    xargs -P "$THREADS_WEB" -I{} bash -c 'ferox_one "$@"' _ {} < "$LIVE_URLS"
   fi
-  # Merge + prioritise crawled/brute-forced URLs (good codes, params, dynamic).
-  if have python3 && { [[ -s "$KATANA_OUT" ]] || [[ -s "$DIRS_OUT" ]]; }; then
-    python3 reporting/urlfilter.py "$KATANA_OUT" "$DIRS_OUT" \
+
+  # 3) consolidate katana + feroxbuster output -> de-noise -> nuclei targets
+  if have python3; then
+    python3 reporting/urlfilter.py "$KATANA_OUT" "$OUT"/ferox_*.txt \
       -o "$OUT/filtered_urls.txt" 2>/dev/null || true
     if [[ -s "$OUT/filtered_urls.txt" ]]; then
       sort -u "$LIVE_URLS" "$OUT/filtered_urls.txt" > "$OUT/nuclei_targets.txt"
       NUCLEI_TARGETS="$OUT/nuclei_targets.txt"
-      ok "Enriched nuclei targets: $(wc -l <"$NUCLEI_TARGETS") (roots + discovered)"
+      ok "Consolidated nuclei targets: $(wc -l <"$NUCLEI_TARGETS") (roots + discovered, de-noised)"
     fi
   fi
 fi
@@ -78,21 +94,5 @@ if have nuclei; then
   run "$LOG" nuclei -l "$NUCLEI_TARGETS" -severity info,low,medium,high,critical \
     -rl 150 -c 25 -o "$OUT/nuclei.txt" -stats 2>/dev/null || true
   ok "nuclei findings: $( [[ -f "$OUT/nuclei.txt" ]] && wc -l <"$OUT/nuclei.txt" || echo 0 )"
-fi
-
-# ---- Content discovery (per host, capped concurrency) ---------------------
-if have feroxbuster && [[ -s "$WEB_WORDLIST" ]]; then
-  ferox_one() {
-    local url="$1"
-    local safe; safe=$(sed 's#[^A-Za-z0-9]#_#g' <<<"$url")
-    feroxbuster -u "$url" -w "$WEB_WORDLIST" -q -k -t 20 \
-      -x php,asp,aspx,jsp,html,txt,bak,config \
-      --no-recursion -o "$OUT/ferox_$safe.txt" 2>/dev/null || true
-    printf '%s[+]%s dirbust %s\n' "$C_GRN" "$C_RST" "$url"
-  }
-  export -f ferox_one; export OUT WEB_WORDLIST C_GRN C_RST
-  log "feroxbuster content discovery (parallel, capped)"
-  THREADS_WEB=$(( THREADS<6 ? THREADS : 6 ))   # don't hammer
-  xargs -P "$THREADS_WEB" -I{} bash -c 'ferox_one "$@"' _ {} < "$LIVE_URLS"
 fi
 ok "Web enumeration complete -> $OUT"
