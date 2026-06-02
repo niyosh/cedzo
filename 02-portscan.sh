@@ -40,11 +40,17 @@ build_map() {
       [[ -n "$ports" ]] && echo "$ip $ports"
     done
   elif [[ -f "$OUT/masscan.gnmap" ]]; then
-    awk '/Ports:/{print}' "$OUT/masscan.gnmap" | while read -r line; do
-      ip=$(awk '{print $4}' <<<"$line")
-      ports=$(grep -oE '[0-9]+/open' <<<"$line" | cut -d/ -f1 | sort -un | paste -sd, -)
-      [[ -n "$ports" ]] && echo "$ip $ports"
-    done
+    # masscan -oG writes ONE "Ports:" line per open port, so aggregate all
+    # ports for each host into a single line (else we'd scan each port as a
+    # separate job, all racing to write the same service.* file).
+    local ip port
+    declare -A _mp=()
+    while read -r line; do
+      ip=$(grep -oE 'Host: [0-9.]+' <<<"$line" | awk '{print $2}')
+      port=$(grep -oE '[0-9]+/open' <<<"$line" | head -1 | cut -d/ -f1)
+      [[ -n "$ip" && -n "$port" ]] && _mp["$ip"]+="${_mp[$ip]:+,}$port"
+    done < <(grep 'Ports:' "$OUT/masscan.gnmap")
+    for ip in "${!_mp[@]}"; do echo "$ip ${_mp[$ip]}"; done
   fi
 }
 build_map | sort -u > "$OUT/host_ports.txt"
@@ -74,8 +80,10 @@ fi
 phase "Role classification (from service scans)"
 classify() {
   local pat="$1" outfile="$2"
+  # A no-match grep exits 1; under `set -euo pipefail` that would abort the
+  # whole module, so swallow it — an empty role list is a valid outcome.
   grep -rilE "$pat" "$OUT/hosts"/*/service.nmap 2>/dev/null \
-    | sed 's#.*/hosts/##; s#/service.nmap##' | sort -u > "$RUN/$outfile"
+    | sed 's#.*/hosts/##; s#/service.nmap##' | sort -u > "$RUN/$outfile" || true
 }
 classify 'microsoft-ds|netbios-ssn|port 445'                "hosts_smb.txt"
 classify 'ldap|kerberos-sec|port 88|microsoft-ds.*Active'   "hosts_dc.txt"
@@ -92,8 +100,9 @@ done
 # Build a web URL list (http/https) for the web module.
 : > "$RUN/web_urls.txt"
 for nmapf in "$OUT"/hosts/*/service.nmap; do
+  [[ -f "$nmapf" ]] || continue          # glob didn't match -> no hosts
   ip=$(basename "$(dirname "$nmapf")")
-  grep -E '^[0-9]+/tcp +open' "$nmapf" 2>/dev/null | while read -r line; do
+  { grep -E '^[0-9]+/tcp +open' "$nmapf" 2>/dev/null || true; } | while read -r line; do
     port=$(cut -d/ -f1 <<<"$line")
     if grep -qiE 'https|ssl/http' <<<"$line"; then echo "https://$ip:$port"
     elif grep -qiE 'http' <<<"$line";       then echo "http://$ip:$port"; fi
