@@ -31,15 +31,23 @@ warn "Only proceed if you have WRITTEN authorisation covering every target."
 read -rp "Type the word AUTHORISED to continue: " a
 [[ "$a" == "AUTHORISED" ]] || { err "Not confirmed. Exiting."; exit 1; }
 
-# ---- Run directory --------------------------------------------------------
-export RUN="$OUTPUT_BASE/run-$(date +%Y%m%d-%H%M%S)"
+# ---- Run directory (STATIC — re-runs resume from the first unfinished phase)
+# A fixed directory means a second invocation reuses prior output: any phase
+# whose '.done' marker is present is skipped, so e.g. if 00/02/03 finished last
+# time, the run picks up at 04. Force a phase to re-run by naming it explicitly
+# (./run.sh 04) or by deleting its marker; start completely fresh by removing
+# the whole run dir ($OUTPUT_BASE/run).
+export RUN="$OUTPUT_BASE/run"
 mkdir -p "$RUN"
 cp "$SCOPE_FILE" "$RUN/scope.txt"
 ok "Output directory: $RUN"
 exec > >(tee -a "$RUN/run.log") 2>&1   # full transcript
 
+# Explicit phase selection forces those phases to re-run (ignoring markers);
+# the default full chain resumes, skipping already-completed phases.
+EXPLICIT=true
 PHASES=("$@")
-[[ ${#PHASES[@]} -eq 0 ]] && PHASES=(00 02 03 04 05 06 07 08)
+[[ ${#PHASES[@]} -eq 0 ]] && { PHASES=(00 02 03 04 05 06 07 08); EXPLICIT=false; }
 
 declare -A MODULE=(
   [00]=00-prep.sh        [02]=02-portscan.sh   [03]=03-enum-smb-ad.sh
@@ -51,8 +59,16 @@ START=$(date +%s)
 for p in "${PHASES[@]}"; do
   script="${MODULE[$p]:-}"
   [[ -n "$script" ]] || { warn "Unknown phase '$p' — skipping."; continue; }
+  if [[ "$EXPLICIT" == "false" && -f "$RUN/.done-$p" ]]; then
+    ok "PHASE $p — $script already complete — skipping (rm $RUN/.done-$p to redo)."
+    continue
+  fi
   phase "PHASE $p — $script"
-  RUN="$RUN" bash "./$script" || warn "Phase $p exited non-zero (continuing)."
+  if RUN="$RUN" bash "./$script"; then
+    touch "$RUN/.done-$p"
+  else
+    warn "Phase $p exited non-zero — not marking complete; it will retry next run."
+  fi
 done
 
 DUR=$(( $(date +%s) - START ))

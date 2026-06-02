@@ -37,17 +37,6 @@ if [[ -n "$NXC" && -s "$SMB" ]]; then
   grep -iE 'password|cpassword|userName' "$OUT/gpp.txt" 2>/dev/null | grep -viE 'not found|no gpp' \
     | sort -u > "$OUT/gpp_creds.txt" || true
   [[ -s "$OUT/gpp_creds.txt" ]] && warn "GPP credentials recovered -> $OUT/gpp_creds.txt"
-
-  log "Spider readable shares (index only, no download) for sensitive files"
-  run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" -M spider_plus \
-    -o DOWNLOAD_FLAG=False OUTPUT_FOLDER="$OUT/spider" 2>/dev/null || true
-  if [[ -d "$OUT/spider" ]]; then
-    grep -rhoiE '[^"]+\.(kdbx|ps1|bat|vbs|cmd|config|conf|ini|xml|ya?ml|csv|xlsx?|docx?|bak|old|vmdk|ovpn|ppk|pem|key|pfx)' \
-      "$OUT/spider" 2>/dev/null \
-      | grep -iE 'pass|secret|cred|admin|backup|unattend|sysprep|\.kdbx|\.ps1|\.ovpn|\.ppk|\.pem|\.pfx|\.key' \
-      | sort -u > "$OUT/sensitive_files.txt" || true
-    [[ -s "$OUT/sensitive_files.txt" ]] && warn "Potentially sensitive files indexed -> $OUT/sensitive_files.txt"
-  fi
 fi
 
 # Per-host deep enum with enum4linux-ng (rich on null/guest).
