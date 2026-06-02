@@ -98,14 +98,22 @@ for f in hosts_smb hosts_dc hosts_web hosts_db hosts_rdp hosts_winrm; do
 done
 
 # Build a web URL list (http/https) for the web module.
+# Match on the service name AND on common web port numbers, so a port that
+# nmap fails to fingerprint (e.g. a slow Tomcat that comes back as "unknown")
+# is still treated as web. Surround with spaces for whole-token matching.
+WEB_PORTS_HTTP=" 80 81 591 2480 3000 5000 7001 7070 7080 8000 8008 8080 8081 8082 8088 8180 8280 8888 9000 9080 9090 "
+WEB_PORTS_HTTPS=" 443 832 981 1311 4443 7443 8243 8443 9443 "
 : > "$RUN/web_urls.txt"
 for nmapf in "$OUT"/hosts/*/service.nmap; do
   [[ -f "$nmapf" ]] || continue          # glob didn't match -> no hosts
   ip=$(basename "$(dirname "$nmapf")")
   { grep -E '^[0-9]+/tcp +open' "$nmapf" 2>/dev/null || true; } | while read -r line; do
     port=$(cut -d/ -f1 <<<"$line")
-    if grep -qiE 'https|ssl/http' <<<"$line"; then echo "https://$ip:$port"
-    elif grep -qiE 'http' <<<"$line";       then echo "http://$ip:$port"; fi
+    if   grep -qiE 'https|ssl/http' <<<"$line" || [[ "$WEB_PORTS_HTTPS" == *" $port "* ]]; then
+      echo "https://$ip:$port"
+    elif grep -qiE 'http'           <<<"$line" || [[ "$WEB_PORTS_HTTP"  == *" $port "* ]]; then
+      echo "http://$ip:$port"
+    fi
   done
 done | sort -u >> "$RUN/web_urls.txt"
 ok "Web URLs: $(wc -l < "$RUN/web_urls.txt") -> $RUN/web_urls.txt"
