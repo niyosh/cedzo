@@ -46,6 +46,58 @@ if [[ "$SCREENSHOTS" == "true" ]] && have gowitness; then
   ok "Screenshots -> $OUT/screens"
 fi
 
+# ---- Exposure checks (read-only GETs of high-value paths) -----------------
+log "Exposure checks (.git/.svn/.env, backups, status, secrets)"
+EXPOSE_PATHS=(
+  .git/HEAD .git/config .svn/entries .env .DS_Store .htaccess web.config
+  config.php.bak config.bak backup.zip backup.tar.gz dump.sql db.sql
+  robots.txt sitemap.xml server-status server-info phpinfo.php
+  .well-known/security.txt actuator/env actuator/health
+)
+: > "$OUT/exposures.txt"
+while read -r base; do
+  [[ -n "$base" ]] || continue
+  for pth in "${EXPOSE_PATHS[@]}"; do
+    url="${base%/}/$pth"
+    code=$(curl -k -s -o /dev/null -m 8 -w '%{http_code}' "$url" 2>/dev/null || echo 000)
+    [[ "$code" =~ ^(200|301|302|401|403)$ ]] && printf '%s  %s\n' "$code" "$url" >> "$OUT/exposures.txt"
+  done
+done < "$LIVE_URLS"
+if [[ -s "$OUT/exposures.txt" ]]; then
+  sort -u -o "$OUT/exposures.txt" "$OUT/exposures.txt"
+  warn "Exposed paths -> $OUT/exposures.txt ($(wc -l <"$OUT/exposures.txt"))"
+fi
+
+# ---- Favicon hashing (mmh3 — fingerprint admin panels / products) ---------
+if have httpx; then
+  log "favicon hashing (mmh3)"
+  httpx -silent -l "$LIVE_URLS" -favicon -o "$OUT/favicon.txt" 2>/dev/null || true
+fi
+
+# ---- WordPress deep-scan (passive enumeration) ----------------------------
+if have wpscan && [[ -s "$OUT/whatweb.txt" ]]; then
+  wpurls=$(grep -iE 'wordpress' "$OUT/whatweb.txt" | grep -oE 'https?://[^ ]+' | sort -u || true)
+  for u in $wpurls; do
+    safe=$(sed 's#[^A-Za-z0-9]#_#g' <<<"$u")
+    log "wpscan $u (passive)"
+    wpscan --url "$u" --no-banner --no-update --random-user-agent \
+      --plugins-detection passive --enumerate vp,vt,cb,dbe \
+      -o "$OUT/wpscan_$safe.txt" 2>/dev/null || true
+  done
+  [[ -n "$wpurls" ]] && ok "WordPress scans -> $OUT/wpscan_*.txt"
+fi
+
+# ---- Virtual-host discovery (optional: needs ffuf + VHOST_WORDLIST) -------
+if have ffuf && [[ -n "${VHOST_WORDLIST:-}" && -s "${VHOST_WORDLIST:-/nonexistent}" && -n "${DOMAIN:-}" ]]; then
+  log "vhost discovery against ${DOMAIN}"
+  while read -r base; do
+    host=$(sed -E 's#https?://##; s#/.*##' <<<"$base")
+    safe=$(sed 's#[^A-Za-z0-9]#_#g' <<<"$base")
+    ffuf -u "$base" -H "Host: FUZZ.${DOMAIN}" -w "$VHOST_WORDLIST" \
+      -ac -of csv -o "$OUT/vhost_$safe.csv" 2>/dev/null || true
+  done < "$LIVE_URLS"
+fi
+
 # ---- Crawl + content discovery (katana + feroxbuster) ---------------------
 # Crawl live web roots (katana) and brute-force common paths (feroxbuster),
 # then consolidate + de-noise everything into a single prioritised endpoint

@@ -28,20 +28,34 @@ recon-kit/
 ├── config.sh            # EDIT: scope, creds, threads, wordlists, crawl, flags
 ├── run.sh               # orchestrator (start here)
 ├── lib/common.sh        # logging + helpers (sourced by all)
-├── 00-setup.sh          # verify/install tooling (incl. katana, dirsearch)
+├── 00-setup.sh          # verify/install tooling (incl. katana, certipy, ...)
 ├── 00-prep.sh           # preflight: validate scope, build live_hosts.txt
-├── 02-portscan.sh       # full TCP + top UDP, -sCV, role classification
-├── 03-enum-smb-ad.sh    # SMB/NetBIOS/LDAP, shares, users, RID brute, e4l-ng
-├── 04-enum-web.sh       # httpx, whatweb, gowitness, katana+dirsearch, nuclei
+├── 02-portscan.sh       # full TCP + top UDP, -sCV, role classification (+NFS)
+├── 03-enum-smb-ad.sh    # SMB/LDAP/shares/RID, GPP cpassword, share spider,
+│                        #   anon-LDAP dump, DNS AXFR, NFS export enum
+├── 04-enum-web.sh       # httpx, whatweb, gowitness, katana+feroxbuster, nuclei,
+│                        #   exposure checks (.git/.env), favicon hash, wpscan
 ├── 05-enum-db.sh        # MSSQL/MySQL/PG/Oracle/Mongo/Redis enum (no brute)
-├── 06-ad-recon.sh       # AS-REP/Kerberoast collection, BloodHound (RO creds)
-├── 07-vuln-scan.sh      # MS17-010, Zerologon, PrintNightmare, TLS, SNMP
-├── 08-report.sh         # consolidate into REPORT.md + HTML reports
+├── 06-ad-recon.sh       # AS-REP/Kerberoast, BloodHound, ADCS/Certipy (RO creds)
+├── 07-vuln-scan.sh      # MS17-010, SMBGhost, BlueKeep, Zerologon, PrintNightmare,
+│                        #   PetitPotam, log4j/proxyshell sweep, TLS, SNMP walk
+├── 08-report.sh         # Top-Risks rollup + REPORT.md + HTML reports
 └── reporting/
     ├── urlfilter.py     # merge/prioritise crawled URLs -> nuclei targets
     ├── nmap2html.py     # infrastructure intel report (risk scoring)
     └── nuclei2html.py   # web vulnerability report (severity-ranked)
 ```
+
+## Coverage at a glance
+
+| Area | Checks (all read-only / non-exploitative) |
+|------|--------------------------------------------|
+| **Active Directory** | RID-brute user harvest, password policy, anonymous LDAP dump, **GPP cpassword in SYSVOL**, **DNS AXFR**, AS-REP/Kerberoast collection, BloodHound, **ADCS template misconfigs (Certipy, ESC1–ESC8)** |
+| **File services** | SMB share enum + **sensitive-file spider** (index only), **NFS exports** + read-only top-level listing |
+| **Web** | httpx/whatweb fingerprint, gowitness, katana crawl + feroxbuster, **exposure checks (.git/.svn/.env/backups/status)**, **favicon mmh3 hash**, **WordPress deep-scan**, nuclei |
+| **Vulns (detect)** | MS17-010, **SMBGhost**, **BlueKeep**, Zerologon, PrintNightmare, PetitPotam, **log4j/ProxyShell/ProxyLogon/Spring4Shell sweep**, SMB signing, TLS hygiene, **SNMP default-community + walk** |
+| **Databases** | version / empty-password / config NSE for MSSQL/MySQL/PG/Oracle/Mongo/Redis |
+| **Reporting** | **prioritised Top-Risks rollup (finding IDs + severity)**, Markdown report, HTML infra + web reports |
 
 Scope is authoritative: every IP/CIDR in `scope.txt` is treated as live and
 scanned; nothing outside it is touched. Host discovery is not used to gate

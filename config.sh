@@ -46,3 +46,10 @@ KATANA_DEPTH="${KATANA_DEPTH:-2}"       # katana crawl depth (raise for deeper a
 # Drop 'info,' here for much faster, higher-signal scans.
 NUCLEI_SEVERITY="${NUCLEI_SEVERITY:-info,low,medium,high,critical}"
 NUCLEI_TIMEOUT="${NUCLEI_TIMEOUT:-10}"  # per-request timeout (s); guards fragile hosts
+
+# --- File services ---------------------------------------------------------
+NFS_MOUNT="${NFS_MOUNT:-true}"          # read-only mount NFS exports to list top-level contents
+
+# --- vhost discovery (optional) --------------------------------------------
+# Set a wordlist to enable ffuf vhost brute against web hosts (uses $DOMAIN).
+VHOST_WORDLIST="${VHOST_WORDLIST:-}"

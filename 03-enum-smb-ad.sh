@@ -31,8 +31,23 @@ if [[ -n "$NXC" && -s "$SMB" ]]; then
   run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" --users    | tee "$OUT/users.txt"
   run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" --pass-pol
   run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" --rid-brute 4000 | tee "$OUT/rid_brute.txt"
-  log "Loggable spider of readable shares for interesting files"
-  run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" -M spider_plus 2>/dev/null || true
+  log "GPP cpassword / autologin in SYSVOL (decrypts to plaintext creds)"
+  run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" -M gpp_password   2>/dev/null | tee -a "$OUT/gpp.txt" || true
+  run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" -M gpp_autologin  2>/dev/null | tee -a "$OUT/gpp.txt" || true
+  grep -iE 'password|cpassword|userName' "$OUT/gpp.txt" 2>/dev/null | grep -viE 'not found|no gpp' \
+    | sort -u > "$OUT/gpp_creds.txt" || true
+  [[ -s "$OUT/gpp_creds.txt" ]] && warn "GPP credentials recovered -> $OUT/gpp_creds.txt"
+
+  log "Spider readable shares (index only, no download) for sensitive files"
+  run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" -M spider_plus \
+    -o DOWNLOAD_FLAG=False OUTPUT_FOLDER="$OUT/spider" 2>/dev/null || true
+  if [[ -d "$OUT/spider" ]]; then
+    grep -rhoiE '[^"]+\.(kdbx|ps1|bat|vbs|cmd|config|conf|ini|xml|ya?ml|csv|xlsx?|docx?|bak|old|vmdk|ovpn|ppk|pem|key|pfx)' \
+      "$OUT/spider" 2>/dev/null \
+      | grep -iE 'pass|secret|cred|admin|backup|unattend|sysprep|\.kdbx|\.ps1|\.ovpn|\.ppk|\.pem|\.pfx|\.key' \
+      | sort -u > "$OUT/sensitive_files.txt" || true
+    [[ -s "$OUT/sensitive_files.txt" ]] && warn "Potentially sensitive files indexed -> $OUT/sensitive_files.txt"
+  fi
 fi
 
 # Per-host deep enum with enum4linux-ng (rich on null/guest).
@@ -60,7 +75,36 @@ if [[ -s "$DC" ]]; then
   while read -r dc; do
     log "anonymous LDAP rootDSE / naming contexts on $dc"
     run "$LOG" ldapsearch -x -H "ldap://$dc" -s base namingcontexts 2>/dev/null || true
+
+    # Derive base DN (and domain) from rootDSE for the deeper queries below.
+    basedn=$(ldapsearch -x -H "ldap://$dc" -s base defaultNamingContext 2>/dev/null \
+      | awk -F': ' '/defaultNamingContext/{print $2}' | tr -d '\r')
+    dom="$DOMAIN"
+    [[ -z "$dom" && -n "$basedn" ]] && dom=$(sed 's/DC=//gI; s/,/./g' <<<"$basedn")
+
+    # Anonymous full subtree dump (only works if anonymous bind is allowed).
+    if [[ -n "$basedn" ]]; then
+      if ldapsearch -x -H "ldap://$dc" -b "$basedn" "(objectClass=*)" \
+           > "$OUT/ldap_anon_$dc.txt" 2>/dev/null && [[ -s "$OUT/ldap_anon_$dc.txt" ]] \
+           && grep -q "numEntries" "$OUT/ldap_anon_$dc.txt" 2>/dev/null; then
+        warn "Anonymous LDAP bind ALLOWED on $dc -> $OUT/ldap_anon_$dc.txt"
+        grep -oiE '^sAMAccountName: .*' "$OUT/ldap_anon_$dc.txt" 2>/dev/null \
+          | awk '{print $2}' | sort -u >> "$RUN/domain_users.txt" || true
+      fi
+    fi
+
+    # DNS zone transfer (AXFR) — instant internal hostname map if misconfigured.
+    if have dig && [[ -n "$dom" ]]; then
+      log "DNS AXFR attempt: $dom @ $dc"
+      dig AXFR "$dom" "@$dc" +noall +answer > "$OUT/axfr_${dc}.txt" 2>/dev/null || true
+      if [[ -s "$OUT/axfr_${dc}.txt" ]]; then
+        warn "DNS zone transfer SUCCEEDED from $dc -> $OUT/axfr_${dc}.txt ($(wc -l <"$OUT/axfr_${dc}.txt") records)"
+      else
+        rm -f "$OUT/axfr_${dc}.txt"
+      fi
+    fi
   done < "$DC"
+  [[ -s "$RUN/domain_users.txt" ]] && sort -u -o "$RUN/domain_users.txt" "$RUN/domain_users.txt"
 
   if [[ -n "$USERNAME" && ( -n "$PASSWORD" || -n "$NTHASH" ) ]] && have ldapdomaindump; then
     log "Authenticated full domain dump (ldapdomaindump)"
@@ -72,4 +116,34 @@ if [[ -s "$DC" ]]; then
     done < "$DC"
   fi
 fi
+# ---- NFS export enumeration (read-only) -----------------------------------
+NFS="$RUN/hosts_nfs.txt"
+if [[ -s "$NFS" ]] && have showmount; then
+  phase "NFS export enumeration"
+  : > "$OUT/nfs_exports.txt"
+  while read -r ip; do
+    [[ -n "$ip" ]] || continue
+    raw=$(showmount -e "$ip" 2>/dev/null || true)
+    paths=$(grep -oE '^/[^[:space:]]*' <<<"$raw" || true)
+    [[ -n "$paths" ]] || continue
+    ok "NFS exports on $ip:"; echo "$raw"
+    { echo "=== $ip ==="; echo "$raw"; } >> "$OUT/nfs_exports.txt"
+
+    # Read-only mount of each export to list top-level contents (recon only).
+    if [[ "${NFS_MOUNT:-true}" == "true" ]]; then
+      while read -r exp; do
+        [[ -n "$exp" ]] || continue
+        mp=$(mktemp -d)
+        if sudo mount -t nfs -o ro,nolock,soft,timeo=30,retry=0 "$ip:$exp" "$mp" 2>/dev/null; then
+          { echo "--- $ip:$exp (top level) ---"; ls -la "$mp" 2>/dev/null; } >> "$OUT/nfs_listing.txt"
+          sudo umount "$mp" 2>/dev/null || true
+        fi
+        rmdir "$mp" 2>/dev/null || true
+      done <<< "$paths"
+    fi
+  done < "$NFS"
+  [[ -s "$OUT/nfs_exports.txt" ]] && ok "NFS exports -> $OUT/nfs_exports.txt"
+  [[ -s "$OUT/nfs_listing.txt" ]] && ok "NFS top-level listings -> $OUT/nfs_listing.txt"
+fi
+
 ok "SMB/AD enumeration complete -> $OUT"

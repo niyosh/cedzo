@@ -29,6 +29,15 @@ TOOLS=(
   "bloodhound-python:bloodhound:bloodhound"
   "ldapdomaindump:python3-ldapdomaindump:"
   "GetUserSPNs.py:python3-impacket:impacket"
+  "certipy:python3-certipy:certipy-ad"
+  "showmount:nfs-common:"
+  "dig:dnsutils:"
+  "snmpwalk:snmp:"
+  "onesixtyone:onesixtyone:"
+  "rdpscan:rdpscan:"
+  "wpscan:wpscan:"
+  "ffuf:ffuf:"
+  "curl:curl:"
 )
 
 MISSING=()

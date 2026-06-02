@@ -53,6 +53,30 @@ if [[ -n "$USERNAME" && ( -n "$PASSWORD" || -n "$NTHASH" ) ]]; then
     fi
   fi
 
+  # ---- ADCS enumeration (Certipy) — certificate template misconfigs -------
+  # Read-only directory query for vulnerable templates / CA settings (ESC1-ESC8).
+  CERTIPY=$(command -v certipy || command -v certipy-ad || true)
+  if [[ -n "$CERTIPY" ]]; then
+    log "ADCS enumeration (certipy find -vulnerable)"
+    pushd "$OUT" >/dev/null
+    if [[ -n "$NTHASH" ]]; then
+      "$CERTIPY" find -u "$USERNAME@$DOMAIN" -hashes ":$NTHASH" -dc-ip "$DC1" \
+        -vulnerable -stdout > certipy_adcs.txt 2>&1 || true
+    else
+      "$CERTIPY" find -u "$USERNAME@$DOMAIN" -p "$PASSWORD" -dc-ip "$DC1" \
+        -vulnerable -stdout > certipy_adcs.txt 2>&1 || true
+    fi
+    popd >/dev/null
+    if grep -qiE 'ESC[0-9]+|Vulnerab' "$OUT/certipy_adcs.txt" 2>/dev/null; then
+      warn "ADCS vulnerable template(s) found -> $OUT/certipy_adcs.txt"
+      grep -iE 'ESC[0-9]+|Template Name|Vulnerab' "$OUT/certipy_adcs.txt" | sort -u > "$OUT/adcs_summary.txt" || true
+    else
+      ok "ADCS enumerated (no vulnerable templates flagged) -> $OUT/certipy_adcs.txt"
+    fi
+  else
+    warn "certipy not installed — skipping ADCS enumeration (pipx install certipy-ad)."
+  fi
+
   # ---- BloodHound collection ---------------------------------------------
   if have bloodhound-python; then
     log "BloodHound collection (-c all)"

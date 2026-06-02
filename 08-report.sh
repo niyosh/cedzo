@@ -47,12 +47,75 @@ emit "| Web services | $(count "$RUN/web_urls.txt") |"
 emit "| Database hosts | $(count "$RUN/hosts_db.txt") |"
 emit "| RDP hosts | $(count "$RUN/hosts_rdp.txt") |"
 emit "| WinRM hosts | $(count "$RUN/hosts_winrm.txt") |"
+emit "| NFS hosts | $(count "$RUN/hosts_nfs.txt") |"
 emit "| Harvested domain users | $(count "$RUN/domain_users.txt") |"
+emit ""
+
+# Executive summary — prioritised top risks ---------------------------------
+# Heuristic rollup over the evidence collected by the other phases. Each row is
+# a high-signal observation worth triaging first; full detail is linked.
+emit "## Executive Summary — Top Risks (prioritised)"
+emit ""
+emit "| ID | Severity | Finding | Evidence |"
+emit "|----|----------|---------|----------|"
+RID=0
+risk() {                                   # severity, finding, evidence
+  RID=$((RID+1))
+  printf '| RK-%03d | **%s** | %s | `%s` |\n' "$RID" "$1" "$2" "$3" >> "$REPORT"
+}
+fhit() { [[ -s "$1" ]] && grep -qiE "$2" "$1" 2>/dev/null; }   # file non-empty AND matches
+gly()  { ls $1 >/dev/null 2>&1; }                              # glob has a match
+
+# --- CRITICAL ---
+fhit "$RUN/07-vuln/smb_vuln_summary.txt" 'ms17-010|VULNERABLE' \
+  && risk CRITICAL "MS17-010 / SMB EternalBlue indicated" "$RUN/07-vuln/smb_vuln_summary.txt"
+fhit "$RUN/07-vuln/nxc_vuln_summary.txt" 'zerologon|VULNERABLE' \
+  && risk CRITICAL "Zerologon / netexec vuln-module hit" "$RUN/07-vuln/nxc_vuln_summary.txt"
+fhit "$RUN/07-vuln/smbghost.txt" 'VULNERABLE|cve-2020-0796' \
+  && risk CRITICAL "SMBGhost (CVE-2020-0796) indicated" "$RUN/07-vuln/smbghost.txt"
+fhit "$RUN/07-vuln/bluekeep.txt" 'VULNERABLE' \
+  && risk CRITICAL "BlueKeep (CVE-2019-0708) candidate" "$RUN/07-vuln/bluekeep.txt"
+[[ -s "$RUN/07-vuln/nuclei_critical.txt" ]] \
+  && risk CRITICAL "High-impact web CVE (Log4Shell/ProxyShell/etc.)" "$RUN/07-vuln/nuclei_critical.txt"
+[[ -s "$RUN/06-ad-recon/adcs_summary.txt" ]] \
+  && risk CRITICAL "ADCS vulnerable certificate template (ESCx)" "$RUN/06-ad-recon/adcs_summary.txt"
+
+# --- HIGH ---
+[[ -s "$RUN/03-smb-ad/gpp_creds.txt" ]] \
+  && risk HIGH "GPP cpassword credentials recovered from SYSVOL" "$RUN/03-smb-ad/gpp_creds.txt"
+gly "$RUN/03-smb-ad/axfr_*.txt" \
+  && risk HIGH "DNS zone transfer (AXFR) allowed" "$RUN/03-smb-ad/"
+gly "$RUN/03-smb-ad/ldap_anon_*.txt" \
+  && risk HIGH "Anonymous LDAP bind allowed" "$RUN/03-smb-ad/"
+[[ -s "$RUN/03-smb-ad/sensitive_files.txt" ]] \
+  && risk HIGH "Sensitive files on readable SMB shares" "$RUN/03-smb-ad/sensitive_files.txt"
+[[ -s "$RUN/03-smb-ad/nfs_exports.txt" ]] \
+  && risk HIGH "NFS exports reachable" "$RUN/03-smb-ad/nfs_exports.txt"
+[[ "$(count "$RUN/06-ad-recon/kerberoast_hashes.txt")" -gt 0 ]] \
+  && risk HIGH "Kerberoastable accounts ($(count "$RUN/06-ad-recon/kerberoast_hashes.txt") hashes; crack offline)" "$RUN/06-ad-recon/kerberoast_hashes.txt"
+[[ "$(count "$RUN/06-ad-recon/asrep_hashes.txt")" -gt 0 ]] \
+  && risk HIGH "AS-REP roastable accounts (crack offline)" "$RUN/06-ad-recon/asrep_hashes.txt"
+fhit "$RUN/05-db/db_nse.nmap" 'empty.password|No password was|Login Success' \
+  && risk HIGH "Database with empty/weak password" "$RUN/05-db/db_nse.nmap"
+[[ -s "$RUN/04-web/exposures.txt" ]] \
+  && risk HIGH "Exposed sensitive web paths (.git/.env/backups/status)" "$RUN/04-web/exposures.txt"
+
+# --- MEDIUM ---
+grep -rqiE 'message_signing: disabled' "$RUN/02-portscan/hosts"/*/service.nmap 2>/dev/null \
+  && risk MEDIUM "SMB signing disabled (NTLM relay risk)" "$RUN/02-portscan/hosts/"
+fhit "$RUN/07-vuln/snmp_hits.txt" '\[' \
+  && risk MEDIUM "SNMP default community string" "$RUN/07-vuln/snmp_hits.txt"
+[[ -s "$RUN/07-vuln/snmp_walk.txt" ]] \
+  && risk MEDIUM "SNMP information disclosure (walked)" "$RUN/07-vuln/snmp_walk.txt"
+
+[[ "$RID" -eq 0 ]] && emit "| — | — | No high-level risks auto-detected — review evidence sections below | — |"
+emit ""
+emit "_Severity is a triage heuristic, not a CVSS score. Confirm each finding before reporting._"
 emit ""
 
 # Per-role host lists -------------------------------------------------------
 emit "## Hosts by Role"
-for role in smb dc web db rdp winrm; do
+for role in smb dc web db rdp winrm nfs; do
   f="$RUN/hosts_$role.txt"
   [[ -s "$f" ]] || continue
   emit ""; emit "### ${role^^} ($(count "$f"))"; emit '```'
@@ -71,6 +134,9 @@ if [[ -s "$RUN/04-web/nuclei.txt" ]]; then
   cat "$RUN/04-web/nuclei.txt" >> "$REPORT"; emit '```'
 fi
 [[ -d "$RUN/04-web/screens" ]] && { emit ""; emit "Screenshots: \`$RUN/04-web/screens/\`"; }
+section_file "Exposed paths (.git/.env/backups/status)" "$RUN/04-web/exposures.txt"
+section_file "Favicon hashes (mmh3)" "$RUN/04-web/favicon.txt"
+ls "$RUN/04-web"/wpscan_*.txt >/dev/null 2>&1 && { emit ""; emit "WordPress scans: \`$RUN/04-web/wpscan_*.txt\`"; }
 
 # SMB / AD enumeration ------------------------------------------------------
 emit ""; emit "## SMB / Active Directory"
@@ -79,6 +145,17 @@ section_file "Enumerated users" "$RUN/03-smb-ad/users.txt"
   shares=$(ls "$RUN/03-smb-ad"/shares* 2>/dev/null | head -1 || true)
   [[ -n "$shares" ]] && section_file "Shares" "$shares"
 }
+section_file "GPP credentials (SYSVOL)" "$RUN/03-smb-ad/gpp_creds.txt"
+section_file "Sensitive files on shares" "$RUN/03-smb-ad/sensitive_files.txt"
+ls "$RUN/03-smb-ad"/ldap_anon_*.txt >/dev/null 2>&1 && { emit ""; emit "Anonymous LDAP dumps: \`$RUN/03-smb-ad/ldap_anon_*.txt\`"; }
+ls "$RUN/03-smb-ad"/axfr_*.txt >/dev/null 2>&1 && { emit ""; emit "DNS zone transfers: \`$RUN/03-smb-ad/axfr_*.txt\`"; }
+
+# NFS file services ---------------------------------------------------------
+if [[ -s "$RUN/03-smb-ad/nfs_exports.txt" ]]; then
+  emit ""; emit "## NFS"
+  section_file "Exports" "$RUN/03-smb-ad/nfs_exports.txt"
+  [[ -s "$RUN/03-smb-ad/nfs_listing.txt" ]] && { emit ""; emit "Top-level listings: \`$RUN/03-smb-ad/nfs_listing.txt\`"; }
+fi
 
 # Database enumeration ------------------------------------------------------
 emit ""; emit "## Databases"
@@ -88,7 +165,10 @@ section_file "DB NSE results" "$RUN/05-db/db_nse.nmap"
 emit ""; emit "## Vulnerability Detections (non-exploitative — validate manually)"
 section_file "SMB vulnerability checks" "$RUN/07-vuln/smb_vuln_summary.txt"
 section_file "netexec vulnerability checks" "$RUN/07-vuln/nxc_vuln_summary.txt"
+section_file "BlueKeep (RDP) check" "$RUN/07-vuln/bluekeep.txt"
+section_file "Critical web CVE sweep (log4j/proxyshell/etc.)" "$RUN/07-vuln/nuclei_critical.txt"
 section_file "SNMP default-community hits" "$RUN/07-vuln/snmp_hits.txt"
+[[ -s "$RUN/07-vuln/snmp_walk.txt" ]]  && { emit ""; emit "SNMP walk detail: \`$RUN/07-vuln/snmp_walk.txt\`"; }
 [[ -s "$RUN/07-vuln/tls_audit.txt" ]] && { emit ""; emit "TLS audit detail: \`$RUN/07-vuln/tls_audit.txt\`"; }
 
 # AD recon collection -------------------------------------------------------
@@ -99,7 +179,9 @@ emit ""
 emit "- Kerberoast hashes collected: **$kr** (\`hashcat -m 13100\`)"
 emit "- AS-REP hashes collected: **$ar** (\`hashcat -m 18200\`)"
 [[ -d "$RUN/06-ad-recon/bloodhound" ]] && emit "- BloodHound data: \`$RUN/06-ad-recon/bloodhound/\` (import into BloodHound GUI)"
+[[ -s "$RUN/06-ad-recon/adcs_summary.txt" ]] && emit "- ADCS vulnerable templates: \`$RUN/06-ad-recon/adcs_summary.txt\` (Certipy)"
 emit ""
+section_file "ADCS vulnerable templates (Certipy)" "$RUN/06-ad-recon/adcs_summary.txt"
 
 emit "---"
 emit "_Recon-only engagement. All findings are observations or detections;"

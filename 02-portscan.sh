@@ -91,8 +91,9 @@ classify 'http|https|ssl/http'                              "hosts_web.txt"
 classify 'ms-sql|mysql|postgresql|oracle|mongodb'           "hosts_db.txt"
 classify 'ms-wbt-server|rdp|port 3389'                      "hosts_rdp.txt"
 classify 'winrm|wsman|port 5985'                            "hosts_winrm.txt"
+classify 'nfs|mountd|rpcbind|portmapper'                    "hosts_nfs.txt"
 
-for f in hosts_smb hosts_dc hosts_web hosts_db hosts_rdp hosts_winrm; do
+for f in hosts_smb hosts_dc hosts_web hosts_db hosts_rdp hosts_winrm hosts_nfs; do
   n=$( [[ -f "$RUN/$f.txt" ]] && wc -l < "$RUN/$f.txt" || echo 0 )
   ok "$(printf '%-12s' "$f"): $n hosts"
 done
