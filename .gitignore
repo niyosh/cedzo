@@ -1,0 +1,12 @@
+# Engagement output (loot is per-run, never commit)
+loot/
+*.html
+scope.txt
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS
+.DS_Store
+*.swp

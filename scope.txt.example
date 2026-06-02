@@ -1,0 +1,4 @@
+# One IP, range, or CIDR per line. Lines starting with # are ignored.
+# 10.10.10.0/24
+# 192.168.50.10-50
+# 172.16.1.5

@@ -1,0 +1,7 @@
+# Python reporting/filtering modules (reporting/*.py) use the standard library
+# only — no pip install is required to generate HTML reports.
+#
+# The web-crawl phase relies on two external binaries (installed by 00-setup.sh,
+# NOT pip): katana (Go) and dirsearch. If you prefer pip for dirsearch:
+#
+#   pip install dirsearch
