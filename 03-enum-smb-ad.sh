@@ -22,25 +22,44 @@ else                            AUTH=(-u '' -p ''); fi   # null session
 [[ -n "$USERNAME" ]] && ok "Using credentials: ${DOMAIN:+$DOMAIN\\}$USERNAME" \
                      || log "No creds set — attempting null/guest sessions."
 
-if [[ -n "$NXC" && -s "$SMB" ]]; then
+# ---- Sub-task: SMB host info + share enumeration --------------------------
+t_smb_shares() {
+  [[ -n "$NXC" && -s "$SMB" ]] || { warn "No netexec or no SMB hosts — skipping."; return 0; }
   log "SMB host info, signing status, OS/domain (nxc)"
   run "$LOG" "$NXC" smb "$SMB"                                 # banner: OS, signing, domain
   log "Enumerate shares"
   run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" --shares -o "$OUT/shares"
+}
+
+# ---- Sub-task: users / password policy / RID brute -> domain_users --------
+t_smb_users() {
+  [[ -n "$NXC" && -s "$SMB" ]] || { warn "No netexec or no SMB hosts — skipping."; return 0; }
   log "Enumerate users / password policy / RID brute"
   run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" --users    | tee "$OUT/users.txt"
   run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" --pass-pol
   run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" --rid-brute 4000 | tee "$OUT/rid_brute.txt"
+  # Pull a clean username list from RID brute for AS-REP / Kerberoast later.
+  if [[ -f "$OUT/rid_brute.txt" ]]; then
+    grep -oP '(?<=\\)[A-Za-z0-9._-]+(?= \(SidTypeUser\))' "$OUT/rid_brute.txt" \
+      | sort -u > "$RUN/domain_users.txt" || true
+    [[ -s "$RUN/domain_users.txt" ]] && ok "Harvested $(wc -l <"$RUN/domain_users.txt") users -> domain_users.txt"
+  fi
+}
+
+# ---- Sub-task: GPP cpassword / autologin in SYSVOL ------------------------
+t_smb_gpp() {
+  [[ -n "$NXC" && -s "$SMB" ]] || { warn "No netexec or no SMB hosts — skipping."; return 0; }
   log "GPP cpassword / autologin in SYSVOL (decrypts to plaintext creds)"
   run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" -M gpp_password   2>/dev/null | tee -a "$OUT/gpp.txt" || true
   run "$LOG" "$NXC" smb "$SMB" "${AUTH[@]}" -M gpp_autologin  2>/dev/null | tee -a "$OUT/gpp.txt" || true
   grep -iE 'password|cpassword|userName' "$OUT/gpp.txt" 2>/dev/null | grep -viE 'not found|no gpp' \
     | sort -u > "$OUT/gpp_creds.txt" || true
   [[ -s "$OUT/gpp_creds.txt" ]] && warn "GPP credentials recovered -> $OUT/gpp_creds.txt"
-fi
+}
 
-# Per-host deep enum with enum4linux-ng (rich on null/guest).
-if have enum4linux-ng && [[ -s "$SMB" ]]; then
+# ---- Sub-task: per-host deep enum with enum4linux-ng ----------------------
+t_enum4linux() {
+  have enum4linux-ng && [[ -s "$SMB" ]] || { warn "enum4linux-ng missing or no SMB hosts — skipping."; return 0; }
   enum_host() {
     local ip="$1"
     enum4linux-ng -A -oJ "$OUT/e4l_$ip" "$ip" >"$OUT/e4l_$ip.txt" 2>&1 || true
@@ -49,17 +68,12 @@ if have enum4linux-ng && [[ -s "$SMB" ]]; then
   export -f enum_host; export OUT C_GRN C_RST
   log "enum4linux-ng per host (parallel)"
   parallelize enum_host < "$SMB"
-fi
+}
 
-# Pull a clean username list from RID brute for AS-REP / Kerberoast collection later.
-if [[ -f "$OUT/rid_brute.txt" ]]; then
-  grep -oP '(?<=\\)[A-Za-z0-9._-]+(?= \(SidTypeUser\))' "$OUT/rid_brute.txt" \
-    | sort -u > "$RUN/domain_users.txt" || true
-  [[ -s "$RUN/domain_users.txt" ]] && ok "Harvested $(wc -l <"$RUN/domain_users.txt") users -> domain_users.txt"
-fi
-
-# ---- LDAP / Kerberos against DCs ------------------------------------------
-if [[ -s "$DC" ]]; then
+# ---- Sub-task: LDAP / Kerberos / DNS against DCs --------------------------
+t_ldap_dc() {
+  [[ -s "$DC" ]] || { warn "No DC hosts — skipping LDAP/DNS enumeration."; return 0; }
+  local dc basedn dom cred
   phase "Domain Controller LDAP enumeration"
   while read -r dc; do
     log "anonymous LDAP rootDSE / naming contexts on $dc"
@@ -112,10 +126,12 @@ if [[ -s "$DC" ]]; then
         -o "$OUT/ldd_$dc" "$dc" || true
     done < "$DC"
   fi
-fi
-# ---- NFS export enumeration (read-only) -----------------------------------
-NFS="$RUN/hosts_nfs.txt"
-if [[ -s "$NFS" ]] && have showmount; then
+}
+
+# ---- Sub-task: NFS export enumeration (read-only) -------------------------
+t_nfs() {
+  local NFS="$RUN/hosts_nfs.txt" ip raw paths exp mp
+  { [[ -s "$NFS" ]] && have showmount; } || { warn "No NFS hosts or showmount missing — skipping."; return 0; }
   phase "NFS export enumeration"
   : > "$OUT/nfs_exports.txt"
   while read -r ip; do
@@ -141,6 +157,14 @@ if [[ -s "$NFS" ]] && have showmount; then
   done < "$NFS"
   [[ -s "$OUT/nfs_exports.txt" ]] && ok "NFS exports -> $OUT/nfs_exports.txt"
   [[ -s "$OUT/nfs_listing.txt" ]] && ok "NFS top-level listings -> $OUT/nfs_listing.txt"
-fi
+}
+
+task smb_shares "SMB host info + share enumeration (nxc)"        t_smb_shares
+task smb_users  "Users / password policy / RID brute -> users"  t_smb_users
+task smb_gpp    "GPP cpassword / autologin in SYSVOL"            t_smb_gpp
+task enum4linux "Per-host enum4linux-ng (parallel)"              t_enum4linux
+task ldap_dc    "DC LDAP rootDSE / anon bind / AXFR / dnsrecon"  t_ldap_dc
+task nfs        "NFS export enumeration (read-only mount/list)"  t_nfs
+run_tasks
 
 ok "SMB/AD enumeration complete -> $OUT"

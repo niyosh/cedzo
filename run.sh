@@ -3,7 +3,8 @@
 # run.sh  -  Orchestrator. Runs the recon phases in order against your scope.
 #
 #   ./run.sh                 # full recon chain (AD recon needs read-only creds)
-#   ./run.sh 00 02 04        # run only selected phases
+#   ./run.sh 00 02 04        # run only selected phases (forces re-run)
+#   ./run.sh menu            # interactive menu: pick a phase, then a sub-task
 #
 # RECON-ONLY: no password spraying, no credential brute force, no service-
 # disruptive actions. Authenticated phases require read-only domain creds.
@@ -43,44 +44,141 @@ cp "$SCOPE_FILE" "$RUN/scope.txt"
 ok "Output directory: $RUN"
 exec > >(tee -a "$RUN/run.log") 2>&1   # full transcript
 
-# Explicit phase selection forces those phases to re-run (ignoring markers);
-# the default full chain resumes, skipping already-completed phases.
-EXPLICIT=true
-PHASES=("$@")
-[[ ${#PHASES[@]} -eq 0 ]] && { PHASES=(00 02 03 04 05 06 07 08); EXPLICIT=false; }
-
+# ---- Phase registry -------------------------------------------------------
+PHASE_ORDER=(00 02 03 04 05 06 07 08)
 declare -A MODULE=(
   [00]=00-prep.sh        [02]=02-portscan.sh   [03]=03-enum-smb-ad.sh
   [04]=04-enum-web.sh    [05]=05-enum-db.sh    [06]=06-ad-recon.sh
   [07]=07-vuln-scan.sh   [08]=08-report.sh
 )
+declare -A PHASE_DESC=(
+  [00]="Preflight & live-host list"   [02]="Port & service scan"
+  [03]="SMB / AD enumeration"         [04]="Web enumeration"
+  [05]="Database enumeration"         [06]="AD recon (roasting / BloodHound)"
+  [07]="Vulnerability detection"      [08]="Consolidated reporting"
+)
 
-START=$(date +%s)
-for p in "${PHASES[@]}"; do
-  script="${MODULE[$p]:-}"
-  [[ -n "$script" ]] || { warn "Unknown phase '$p' — skipping."; continue; }
-  if [[ "$EXPLICIT" == "false" && -f "$RUN/.done-$p" ]]; then
-    ok "PHASE $p — $script already complete — skipping (rm $RUN/.done-$p to redo)."
-    continue
-  fi
+# Run one phase (all its sub-tasks). Writes a .done marker on success.
+run_phase() {
+  local p="$1" script="${MODULE[$1]:-}"
+  [[ -n "$script" ]] || { warn "Unknown phase '$p' — skipping."; return 0; }
   phase "PHASE $p — $script"
   if RUN="$RUN" bash "./$script"; then
     touch "$RUN/.done-$p"
   else
     warn "Phase $p exited non-zero — not marking complete; it will retry next run."
   fi
-done
+}
 
+# Run a list of phases. In resume mode (explicit=false) phases with a .done
+# marker are skipped; explicit selection always re-runs.
+run_phases() {
+  local explicit="$1"; shift
+  local p
+  for p in "$@"; do
+    [[ -n "${MODULE[$p]:-}" ]] || { warn "Unknown phase '$p' — skipping."; continue; }
+    if [[ "$explicit" == "false" && -f "$RUN/.done-$p" ]]; then
+      ok "PHASE $p — ${MODULE[$p]} already complete — skipping (rm $RUN/.done-$p to redo)."
+      continue
+    fi
+    run_phase "$p"
+  done
+}
+
+# Run a single sub-task within a phase (manual mode; no .done marker).
+run_phase_task() {
+  phase "PHASE $1 — sub-task '$2'"
+  TASK_ONLY="$2" RUN="$RUN" bash "./${MODULE[$1]}" || warn "Sub-task '$2' exited non-zero."
+}
+
+# Print a phase's sub-tasks as "id<TAB>description" lines (no side effects).
+phase_tasks() {
+  TASK_LIST=1 RUN="$RUN" bash "./${MODULE[$1]}" 2>/dev/null \
+    | awk -F'\t' '$1=="TASK"{print $2"\t"$3}'
+}
+
+print_summary() {
+  ok "All output under: $RUN"
+  echo
+  log "Start with the consolidated report, then drill into the evidence:"
+  echo "  - $RUN/REPORT.md                     (consolidated recon summary, Markdown)"
+  echo "  - $RUN/nmap_report.html              (infrastructure intel + risk scores)"
+  echo "  - $RUN/web_report.html               (web vulnerabilities, severity-ranked)"
+  echo "  - $RUN/07-vuln/*_summary.txt         (EternalBlue/Zerologon/etc. detections)"
+  echo "  - $RUN/03-smb-ad/shares*             (readable shares, null sessions)"
+  echo "  - $RUN/04-web/nuclei.txt             (web findings)"
+  echo "  - $RUN/06-ad-recon/*hashes.txt       (crack OFFLINE w/ hashcat)"
+  echo "  - $RUN/05-db/db_nse.nmap             (empty-password DBs)"
+}
+
+# ---- Interactive sub-task menu: phase 00..08 -> sub-task -> run -----------
+task_submenu() {
+  local p="$1" lines ids=() descs=() id desc i sel
+  lines=$(phase_tasks "$p")
+  if [[ -z "$lines" ]]; then warn "No sub-tasks found for phase $p."; return 0; fi
+  while IFS=$'\t' read -r id desc; do
+    [[ -n "$id" ]] && { ids+=("$id"); descs+=("$desc"); }
+  done <<<"$lines"
+  while true; do
+    echo
+    phase "Phase $p — ${PHASE_DESC[$p]} — choose a sub-task"
+    for i in "${!ids[@]}"; do
+      printf '   %2d  %-14s %s\n' "$((i+1))" "${ids[$i]}" "${descs[$i]}"
+    done
+    printf '    a   Run the WHOLE phase %s\n' "$p"
+    printf '    b   Back to phase list\n'
+    read -rp "task> " sel || { echo; return 0; }
+    case "$sel" in
+      b|B|"") return 0 ;;
+      a|A)    run_phase "$p" ;;
+      *)
+        if [[ "$sel" =~ ^[0-9]+$ ]] && (( sel>=1 && sel<=${#ids[@]} )); then
+          run_phase_task "$p" "${ids[$((sel-1))]}"
+        else
+          warn "Invalid selection: '$sel'"
+        fi ;;
+    esac
+  done
+}
+
+interactive_menu() {
+  local p choice mark
+  while true; do
+    echo
+    phase "Select a phase (then a sub-task), or run everything"
+    for p in "${PHASE_ORDER[@]}"; do
+      mark=" "; [[ -f "$RUN/.done-$p" ]] && mark="✓"
+      printf '   [%s] %s  %s\n' "$mark" "$p" "${PHASE_DESC[$p]}"
+    done
+    printf '       a   Run ALL phases (full chain, resume-aware)\n'
+    printf '       q   Quit\n'
+    read -rp "phase> " choice || { echo; return 0; }
+    case "$choice" in
+      q|Q|"") return 0 ;;
+      a|A)    run_phases false "${PHASE_ORDER[@]}" ;;
+      *)
+        if [[ -n "${MODULE[$choice]:-}" ]]; then task_submenu "$choice"
+        else warn "Unknown phase: '$choice'"; fi ;;
+    esac
+  done
+}
+
+# ---- Dispatch -------------------------------------------------------------
+if [[ "${1:-}" =~ ^(menu|-i|--menu|--interactive)$ ]]; then
+  interactive_menu
+  echo
+  print_summary
+  exit 0
+fi
+
+# Explicit phase selection forces those phases to re-run (ignoring markers);
+# the default full chain resumes, skipping already-completed phases.
+EXPLICIT=true
+PHASES=("$@")
+[[ ${#PHASES[@]} -eq 0 ]] && { PHASES=("${PHASE_ORDER[@]}"); EXPLICIT=false; }
+
+START=$(date +%s)
+run_phases "$EXPLICIT" "${PHASES[@]}"
 DUR=$(( $(date +%s) - START ))
 phase "DONE in $((DUR/60))m $((DUR%60))s"
-ok "All output under: $RUN"
-echo
-log "Start with the consolidated report, then drill into the evidence:"
-echo "  - $RUN/REPORT.md                     (consolidated recon summary, Markdown)"
-echo "  - $RUN/nmap_report.html              (infrastructure intel + risk scores)"
-echo "  - $RUN/web_report.html               (web vulnerabilities, severity-ranked)"
-echo "  - $RUN/07-vuln/*_summary.txt         (EternalBlue/Zerologon/etc. detections)"
-echo "  - $RUN/03-smb-ad/shares*             (readable shares, null sessions)"
-echo "  - $RUN/04-web/nuclei.txt             (web findings)"
-echo "  - $RUN/06-ad-recon/*hashes.txt       (crack OFFLINE w/ hashcat)"
-echo "  - $RUN/05-db/db_nse.nmap             (empty-password DBs)"
+print_summary

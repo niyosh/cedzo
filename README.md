@@ -41,7 +41,7 @@ This project merges two earlier tools into one:
 ## 🗺️ Flow
 
 ```
- scope.txt ─► run.sh ─► [AUTHORISED gate] ─► loot/run-<timestamp>/  ($RUN = shared bus)
+ scope.txt ─► run.sh ─► [AUTHORISED gate] ─► loot/run/  ($RUN = shared bus, reused across runs)
                                                   │
    00 prep ──────────────────────────────────────┤  scope.txt ─► live_hosts.txt
                                                   │
@@ -75,7 +75,7 @@ cedzo/
 ├── 00-setup.sh          # 🔧  verify/install tooling (nmap, nuclei, katana, certipy…)
 ├── 00-prep.sh           # ✅  preflight: validate scope → live_hosts.txt
 ├── 02-portscan.sh       # 📡  full TCP + top UDP, -sCV, role classification (+NFS)
-├── 03-enum-smb-ad.sh    # 🪟  SMB/LDAP/shares/RID, GPP cpassword, share spider,
+├── 03-enum-smb-ad.sh    # 🪟  SMB/LDAP/shares/RID, GPP cpassword,
 │                        #      anon-LDAP dump, DNS AXFR + dnsrecon, NFS export enum
 ├── 04-enum-web.sh       # 🌐  httpx, whatweb, gowitness, katana+feroxbuster, nuclei,
 │                        #      exposures, favicon, wpscan, NTLMRecon, shortscan
@@ -100,7 +100,7 @@ cedzo/
 | Area | Checks &nbsp;·&nbsp; *(all read-only / non-exploitative)* |
 |------|------------------------------------------------------------|
 | 🎫 **Active Directory** | RID-brute user harvest, password policy, anonymous LDAP dump, **GPP cpassword (SYSVOL)**, **DNS AXFR + dnsrecon**, **kerbrute userenum** (validate users, no spray), AS-REP/Kerberoast collection, BloodHound, **ADCS template misconfigs (Certipy, ESC1–ESC8)** |
-| 📁 **File services** | SMB share enum + **sensitive-file spider** (index only), **NFS exports** + read-only top-level listing |
+| 📁 **File services** | SMB share enumeration, **NFS exports** + read-only top-level listing |
 | 🌐 **Web** | httpx/whatweb fingerprint, gowitness, katana crawl + feroxbuster, **exposure checks (.git/.svn/.env/backups/status)**, **favicon mmh3 hash**, **WordPress deep-scan**, **NTLMRecon** (internal AD leak), **shortscan** (IIS 8.3), CMSeeK *(opt)*, nuclei |
 | 💥 **Vulns (detect)** | MS17-010, **SMBGhost**, **BlueKeep**, Zerologon, PrintNightmare, PetitPotam, **log4j / ProxyShell / ProxyLogon / Spring4Shell sweep**, SMB signing, **TLS hygiene (testssl.sh)**, **SNMP default-community + walk** |
 | 🗄️ **Databases** | version / empty-password / config NSE for MSSQL · MySQL · PostgreSQL · Oracle · Mongo · Redis |
@@ -127,13 +127,31 @@ chmod +x *.sh lib/*.sh
 # 4) Run the full unauthenticated recon chain
 ./run.sh
 
-# …or selected phases only (share one run dir)
+# …or selected phases only (forces them to re-run)
 ./run.sh 00 02 04 08
+
+# …or drive it manually: pick a phase (00–08), then a single sub-task to run
+./run.sh menu
 
 # 🔑 Authenticated AD recon (read-only creds → LDAP dump, BloodHound, ADCS,
 #    SPN + AS-REP collection — still no spraying or brute force):
 DOMAIN=CORP.LOCAL DC_IP=10.10.10.10 USERNAME=jdoe PASSWORD='Summer2025!' ./run.sh 03 06
 ```
+
+> **Output is a fixed directory (`loot/run/`) and runs resume.** Each phase that
+> finishes drops a `.done-NN` marker; the next `./run.sh` skips completed phases
+> and picks up at the first unfinished one (e.g. if 00/02/03 are done, it starts
+> at 04). Naming phases explicitly (`./run.sh 04`) forces them to re-run; delete
+> `loot/run/` to start completely fresh.
+
+### 🧭 Interactive menu (`./run.sh menu`)
+
+Manual, à-la-carte execution. The top level lists the phases (`00`–`08`, with a
+`✓` next to completed ones); choosing one lists its **sub-tasks**, and choosing a
+sub-task runs just that step. For example, phase `07` exposes `smb_nse`,
+`nxc_modules`, `zerologon`, `smbghost`, `bluekeep`, `nuclei_cve`, `tls`, `snmp` —
+pick `bluekeep` to run only the BlueKeep check. `a` runs a whole phase; the full
+chain is still `./run.sh` with no arguments.
 
 ---
 
@@ -183,7 +201,7 @@ python3 reporting/nuclei2html.py -i loot/run-<ts> -o web_report.html
 | Asset in scope | Primary modules | What you get |
 |----------------|-----------------|--------------|
 | 🎫 Domain Controllers | 03 · 06 · 07 | LDAP dump, AXFR, roastable accounts, ADCS (ESCx), Zerologon/PetitPotam, BloodHound |
-| 📁 File servers | 03 | Share enum + sensitive-file spider, NFS exports |
+| 📁 File servers | 03 | Share enumeration, NFS exports |
 | 🌐 Web / app servers | 04 | Fingerprint, crawl + feroxbuster, exposures, favicon, wpscan, nuclei, screenshots |
 | 🗄️ Database servers | 05 | Version / empty-password / config checks (no brute force) |
 | 🖥️ Terminal / RDP / WinRM | 02 · 07 | Exposed management surfaces, BlueKeep check |

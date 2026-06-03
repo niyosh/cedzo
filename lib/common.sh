@@ -50,3 +50,42 @@ require_scope() {
 
 # Strip comments/blanks from scope file.
 clean_scope() { grep -vE '^\s*(#|$)' "$SCOPE_FILE"; }
+
+# ---- Sub-task framework ---------------------------------------------------
+# Each phase splits its work into named sub-tasks (bash functions) registered
+# with `task`. `run_tasks` then either:
+#   * runs every registered task in order   (normal phase run; ./run.sh path),
+#   * runs a single task                     (TASK_ONLY=<id>; menu "run task"),
+#   * prints the task catalogue and exits    (TASK_LIST=1;     menu listing).
+# This keeps the full-chain behaviour identical while enabling manual,
+# per-task execution from the interactive menu.
+_TASK_IDS=(); declare -A _TASK_DESC=(); declare -A _TASK_FN=()
+
+task() {                       # task <id> <description> <function-name>
+  _TASK_IDS+=("$1"); _TASK_DESC["$1"]="$2"; _TASK_FN["$1"]="$3"
+}
+
+# True when the phase was launched only to enumerate its tasks for the menu.
+# Phases use this to skip their "prerequisite missing -> exit" gates so the
+# catalogue can be listed before earlier phases have produced their output.
+task_listing() { [[ "${TASK_LIST:-0}" == "1" ]]; }
+
+run_tasks() {
+  (( ${#_TASK_IDS[@]} )) || return 0
+  local id
+  if task_listing; then
+    # Sentinel-prefixed, tab-separated so the menu can parse cleanly even amid
+    # other stdout noise from phase setup.
+    for id in "${_TASK_IDS[@]}"; do printf 'TASK\t%s\t%s\n' "$id" "${_TASK_DESC[$id]}"; done
+    return 0
+  fi
+  local only="${TASK_ONLY:-}" ran=0
+  for id in "${_TASK_IDS[@]}"; do
+    [[ -n "$only" && "$only" != "$id" ]] && continue
+    ran=1
+    phase "▸ $id — ${_TASK_DESC[$id]}"
+    "${_TASK_FN[$id]}" || warn "sub-task '$id' exited non-zero (continuing)."
+  done
+  if [[ -n "$only" && "$ran" -eq 0 ]]; then err "No such sub-task: '$only'"; return 1; fi
+  return 0
+}
