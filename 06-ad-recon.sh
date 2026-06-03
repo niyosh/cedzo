@@ -29,7 +29,6 @@ USERS="$RUN/domain_users.txt"
 [[ -s "$OUT/valid_users.txt" ]] && USERS="$OUT/valid_users.txt"
 
 # netexec auth args (LDAP/SMB): use creds if present, else a null/anon session.
-# Mirrors linWinPwn's argument_ne construction, mapped onto cedzo's config vars.
 NE_D=();  [[ -n "$DOMAIN" ]] && NE_D=(-d "$DOMAIN")
 if   [[ -n "$NTHASH"   ]]; then NE_AUTH=(-u "${USERNAME:-}" -H "$NTHASH")
 elif [[ -n "$PASSWORD" ]]; then NE_AUTH=(-u "${USERNAME:-}" -p "$PASSWORD")
@@ -138,10 +137,9 @@ t_bloodhound() {
 }
 
 # ==========================================================================
-# linWinPwn-derived recon (read-only). The tasks below replicate the READ-ONLY
-# LDAP/SCCM/delegation enumeration from lefayjey's linWinPwn (vendored under
-# vendor/linWinPwn/) — directory queries only. No spraying, brute force, or
-# credential dumping is performed, so cedzo stays recon-only.
+# Extended AD recon (read-only). LDAP / SCCM / delegation enumeration via
+# directory queries only. No spraying, brute force, or credential dumping is
+# performed, so cedzo stays recon-only.
 # ==========================================================================
 
 # ---- Sub-task: LDAP recon via netexec (directory queries) -----------------

@@ -88,15 +88,6 @@ python3 reporting/nmap2html.py   -i loot/run -o nmap_report.html
 python3 reporting/nuclei2html.py -i loot/run -o web_report.html
 ```
 
-## linWinPwn (vendored)
-
-The full [linWinPwn](https://github.com/lefayjey/linWinPwn) framework (by
-lefayjey) is vendored under `vendor/linWinPwn/` for reference / manual use.
-cedzo does **not** run its attack paths — it natively re-implements only
-linWinPwn's read-only enumeration (LDAP recon, delegation, SCCM, Timeroast,
-ldeep) as recon-safe sub-tasks in `06-ad-recon.sh`. See
-[`vendor/linWinPwn/README.md`](vendor/linWinPwn/README.md).
-
 ## Notes
 
 - Tune `THREADS`, `MIN_RATE`, `NMAP_TIMING` **down** on fragile / segmented links.
