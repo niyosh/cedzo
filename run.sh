@@ -58,6 +58,10 @@ declare -A PHASE_DESC=(
   [07]="Vulnerability detection"      [08]="Consolidated reporting"
 )
 
+# Menu styling (bold tracks whether colours are enabled; BAR = left accent).
+C_BLD=''; [[ -n "$C_CYN" ]] && C_BLD=$'\e[1m'
+BAR="${C_CYN}┃${C_RST}"
+
 # Run one phase (all its sub-tasks). Writes a .done marker on success.
 run_phase() {
   local p="$1" script="${MODULE[$1]:-}"
@@ -120,14 +124,19 @@ task_submenu() {
     [[ -n "$id" ]] && { ids+=("$id"); descs+=("$desc"); }
   done <<<"$lines"
   while true; do
-    echo
-    phase "Phase $p — ${PHASE_DESC[$p]} — choose a sub-task"
+    printf '\n %s\n' "$BAR"
+    printf ' %s  %s%sPhase %s%s  %s%s%s\n' "$BAR" "$C_BLD" "$C_CYN" "$p" "$C_RST" "$C_DIM" "${PHASE_DESC[$p]}" "$C_RST"
+    printf ' %s  %spick a sub-task to run on its own%s\n' "$BAR" "$C_DIM" "$C_RST"
+    printf ' %s\n' "$BAR"
     for i in "${!ids[@]}"; do
-      printf '   %2d  %-14s %s\n' "$((i+1))" "${ids[$i]}" "${descs[$i]}"
+      printf ' %s   %s%2d%s  %s%-13s%s %s%s%s\n' \
+        "$BAR" "$C_YEL" "$((i+1))" "$C_RST" "$C_GRN" "${ids[$i]}" "$C_RST" "$C_DIM" "${descs[$i]}" "$C_RST"
     done
-    printf '    a   Run the WHOLE phase %s\n' "$p"
-    printf '    b   Back to phase list\n'
-    read -rp "task> " sel || { echo; return 0; }
+    printf ' %s\n' "$BAR"
+    printf ' %s   %sa%s  %s▶%s run the whole phase %s\n' "$BAR" "$C_YEL" "$C_RST" "$C_GRN" "$C_RST" "$p"
+    printf ' %s   %sb%s  %s◂%s back to phase list\n'     "$BAR" "$C_YEL" "$C_RST" "$C_BLU" "$C_RST"
+    printf ' %s\n' "$BAR"
+    read -rp "$(printf ' %stask ▸%s ' "$C_CYN" "$C_RST")" sel || { echo; return 0; }
     case "$sel" in
       b|B|"") return 0 ;;
       a|A)    run_phase "$p" ;;
@@ -142,17 +151,25 @@ task_submenu() {
 }
 
 interactive_menu() {
-  local p choice mark
+  local p choice
   while true; do
-    echo
-    phase "Select a phase (then a sub-task), or run everything"
+    printf '\n %s\n' "$BAR"
+    printf ' %s  %s%sCEDZO%s %s· internal network recon kit%s\n' "$BAR" "$C_BLD" "$C_CYN" "$C_RST" "$C_DIM" "$C_RST"
+    printf ' %s  %spick a phase, then a sub-task — or run everything%s\n' "$BAR" "$C_DIM" "$C_RST"
+    printf ' %s\n' "$BAR"
     for p in "${PHASE_ORDER[@]}"; do
-      mark=" "; [[ -f "$RUN/.done-$p" ]] && mark="✓"
-      printf '   [%s] %s  %s\n' "$mark" "$p" "${PHASE_DESC[$p]}"
+      if [[ -f "$RUN/.done-$p" ]]; then
+        printf ' %s   %s✓%s  %s%s%s  %s\n' "$BAR" "$C_GRN" "$C_RST" "$C_CYN" "$p" "$C_RST" "${PHASE_DESC[$p]}"
+      else
+        printf ' %s   %s·%s  %s%s%s  %s\n' "$BAR" "$C_DIM" "$C_RST" "$C_CYN" "$p" "$C_RST" "${PHASE_DESC[$p]}"
+      fi
     done
-    printf '       a   Run ALL phases (full chain, resume-aware)\n'
-    printf '       q   Quit\n'
-    read -rp "phase> " choice || { echo; return 0; }
+    printf ' %s\n' "$BAR"
+    printf ' %s   %sa%s  %s▶%s run ALL phases  %s(full chain, resume-aware)%s\n' \
+      "$BAR" "$C_YEL" "$C_RST" "$C_GRN" "$C_RST" "$C_DIM" "$C_RST"
+    printf ' %s   %sq%s  %s✕%s quit\n' "$BAR" "$C_YEL" "$C_RST" "$C_RED" "$C_RST"
+    printf ' %s\n' "$BAR"
+    read -rp "$(printf ' %sphase ▸%s ' "$C_CYN" "$C_RST")" choice || { echo; return 0; }
     case "$choice" in
       q|Q|"") return 0 ;;
       a|A)    run_phases false "${PHASE_ORDER[@]}" ;;
