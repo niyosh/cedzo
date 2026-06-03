@@ -80,18 +80,28 @@ cedzo/
 ├── 04-enum-web.sh       # 🌐  httpx, whatweb, gowitness, katana+feroxbuster, nuclei,
 │                        #      exposures, favicon, wpscan, NTLMRecon, shortscan
 ├── 05-enum-db.sh        # 🗄️   MSSQL/MySQL/PG/Oracle/Mongo/Redis enum (no brute)
-├── 06-ad-recon.sh       # 🎫  kerbrute userenum, AS-REP/Kerberoast, BloodHound, Certipy
+├── 06-ad-recon.sh       # 🎫  kerbrute, AS-REP/Kerberoast, BloodHound, Certipy, LDAP recon,
+│                        #      delegation/SCCM enum, Timeroast, ldeep (linWinPwn-derived, read-only)
 ├── 07-vuln-scan.sh      # 💥  MS17-010, SMBGhost, BlueKeep, Zerologon, PrintNightmare,
 │                        #      PetitPotam, log4j/proxyshell sweep, testssl.sh, SNMP walk
 ├── 08-report.sh         # 📊  noseyparker secrets + Top-Risks rollup + REPORT.md + HTML
-└── reporting/
-    ├── urlfilter.py     # 🧹  consolidate + de-noise crawled URLs → nuclei targets
-    ├── nmap2html.py     # 🖥️   infrastructure intel report (risk scoring)
-    └── nuclei2html.py   # 🐛  web vulnerability report (severity-ranked)
+├── reporting/
+│   ├── urlfilter.py     # 🧹  consolidate + de-noise crawled URLs → nuclei targets
+│   ├── nmap2html.py     # 🖥️   infrastructure intel report (risk scoring)
+│   └── nuclei2html.py   # 🐛  web vulnerability report (severity-ranked)
+└── vendor/
+    └── linWinPwn/       # 📦  vendored 3rd-party AD framework (lefayjey) — reference/manual
+                         #      use only; cedzo re-implements its READ-ONLY recon in phase 06
 ```
 
 > Scope is authoritative: every IP/CIDR in `scope.txt` is treated as live and scanned;
 > nothing outside it is touched. Host discovery is **not** used to gate targets.
+
+> **linWinPwn:** the full framework is vendored under `vendor/linWinPwn/` for
+> reference/manual use. cedzo does **not** run its attack paths — it natively
+> re-implements only linWinPwn's read-only enumeration (LDAP recon, delegation,
+> SCCM, Timeroast, ldeep) as recon-safe sub-tasks in `06-ad-recon.sh`. See
+> [`vendor/linWinPwn/README.md`](vendor/linWinPwn/README.md).
 
 ---
 
@@ -99,7 +109,7 @@ cedzo/
 
 | Area | Checks &nbsp;·&nbsp; *(all read-only / non-exploitative)* |
 |------|------------------------------------------------------------|
-| 🎫 **Active Directory** | RID-brute user harvest, password policy, anonymous LDAP dump, **GPP cpassword (SYSVOL)**, **DNS AXFR + dnsrecon**, **kerbrute userenum** (validate users, no spray), AS-REP/Kerberoast collection, BloodHound, **ADCS template misconfigs (Certipy, ESC1–ESC8)** |
+| 🎫 **Active Directory** | RID-brute user harvest, password policy, anonymous LDAP dump, **GPP cpassword (SYSVOL)**, **DNS AXFR + dnsrecon**, **kerbrute userenum** (validate users, no spray), AS-REP/Kerberoast collection, BloodHound, **ADCS template misconfigs (Certipy, ESC1–ESC8)**, **LDAP recon (DC-list, MachineAccountQuota, subnets, password-not-required, passwords in descriptions)**, **delegation enum (unconstrained/constrained/RBCD)**, **SCCM/MECM discovery**, **Timeroast** (offline), **ldeep full LDAP dump** |
 | 📁 **File services** | SMB share enumeration, **NFS exports** + read-only top-level listing |
 | 🌐 **Web** | httpx/whatweb fingerprint, gowitness, katana crawl + feroxbuster, **exposure checks (.git/.svn/.env/backups/status)**, **favicon mmh3 hash**, **WordPress deep-scan**, **NTLMRecon** (internal AD leak), **shortscan** (IIS 8.3), CMSeeK *(opt)*, nuclei |
 | 💥 **Vulns (detect)** | MS17-010, **SMBGhost**, **BlueKeep**, Zerologon, PrintNightmare, PetitPotam, **log4j / ProxyShell / ProxyLogon / Spring4Shell sweep**, SMB signing, **TLS hygiene (testssl.sh)**, **SNMP default-community + walk** |
@@ -200,7 +210,7 @@ python3 reporting/nuclei2html.py -i loot/run-<ts> -o web_report.html
 
 | Asset in scope | Primary modules | What you get |
 |----------------|-----------------|--------------|
-| 🎫 Domain Controllers | 03 · 06 · 07 | LDAP dump, AXFR, roastable accounts, ADCS (ESCx), Zerologon/PetitPotam, BloodHound |
+| 🎫 Domain Controllers | 03 · 06 · 07 | LDAP dump + recon (MAQ, subnets, delegation, SCCM, desc passwords), AXFR, roastable accounts, Timeroast, ADCS (ESCx), Zerologon/PetitPotam, BloodHound |
 | 📁 File servers | 03 | Share enumeration, NFS exports |
 | 🌐 Web / app servers | 04 | Fingerprint, crawl + feroxbuster, exposures, favicon, wpscan, nuclei, screenshots |
 | 🗄️ Database servers | 05 | Version / empty-password / config checks (no brute force) |

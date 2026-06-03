@@ -115,6 +115,10 @@ t_markdown() {
     && risk HIGH "Exposed sensitive web paths (.git/.env/backups/status)" "$RUN/04-web/exposures.txt"
   [[ -s "$RUN/secrets_report.txt" ]] \
     && risk HIGH "Secrets detected in collected loot (noseyparker)" "$RUN/secrets_report.txt"
+  [[ -s "$RUN/06-ad-recon/ldap/desc_creds.txt" ]] \
+    && risk HIGH "Passwords in AD user description / userPassword attributes" "$RUN/06-ad-recon/ldap/desc_creds.txt"
+  [[ "$(count "$RUN/06-ad-recon/timeroast_hashes.txt")" -gt 0 ]] \
+    && risk HIGH "Timeroastable computer accounts (crack offline, hashcat -m 31300)" "$RUN/06-ad-recon/timeroast_hashes.txt"
   gly "$RUN/03-smb-ad/dnsrecon_*.json" \
     && risk MEDIUM "Internal DNS enumeration (records/SRV/AXFR via dnsrecon)" "$RUN/03-smb-ad/"
   [[ -s "$RUN/04-web/ntlmrecon.csv" || -s "$RUN/04-web/ntlmrecon.txt" ]] \
@@ -199,16 +203,22 @@ t_markdown() {
 
   # AD recon collection -------------------------------------------------------
   emit ""; emit "## AD Recon Collection (crack OFFLINE, out of band)"
-  local kr ar
+  local kr ar tr
   kr=$(count "$RUN/06-ad-recon/kerberoast_hashes.txt")
   ar=$(count "$RUN/06-ad-recon/asrep_hashes.txt")
+  tr=$(count "$RUN/06-ad-recon/timeroast_hashes.txt")
   emit ""
   emit "- Kerberoast hashes collected: **$kr** (\`hashcat -m 13100\`)"
   emit "- AS-REP hashes collected: **$ar** (\`hashcat -m 18200\`)"
+  emit "- Timeroast hashes collected: **$tr** (\`hashcat -m 31300\`)"
   [[ -d "$RUN/06-ad-recon/bloodhound" ]] && emit "- BloodHound data: \`$RUN/06-ad-recon/bloodhound/\` (import into BloodHound GUI)"
   [[ -s "$RUN/06-ad-recon/adcs_summary.txt" ]] && emit "- ADCS vulnerable templates: \`$RUN/06-ad-recon/adcs_summary.txt\` (Certipy)"
+  [[ -d "$RUN/06-ad-recon/ldeep" ]] && emit "- ldeep full LDAP dump: \`$RUN/06-ad-recon/ldeep/\`"
   emit ""
   section_file "ADCS vulnerable templates (Certipy)" "$RUN/06-ad-recon/adcs_summary.txt"
+  section_file "Passwords in LDAP descriptions / attributes" "$RUN/06-ad-recon/ldap/desc_creds.txt"
+  section_file "Delegation enumeration (impacket findDelegation)" "$RUN/06-ad-recon/findDelegation.txt"
+  section_file "SCCM / MECM discovery" "$RUN/06-ad-recon/sccm.txt"
 
   # Secrets in collected loot ------------------------------------------------
   if [[ -s "$RUN/secrets_report.txt" ]]; then

