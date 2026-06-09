@@ -158,6 +158,10 @@ t_markdown() {
     emit ""; emit "### nuclei findings ($(count "$RUN/04-web/nuclei.txt"))"; emit '```'
     cat "$RUN/04-web/nuclei.txt" >> "$REPORT"; emit '```'
   fi
+  if [[ -s "$RUN/04-web/nuclei_ai.txt" ]]; then
+    emit ""; emit "### nuclei findings — AI-targeted pass ($(count "$RUN/04-web/nuclei_ai.txt"))"; emit '```'
+    cat "$RUN/04-web/nuclei_ai.txt" >> "$REPORT"; emit '```'
+  fi
   [[ -d "$RUN/04-web/screens" ]] && { emit ""; emit "Screenshots: \`$RUN/04-web/screens/\`"; }
   section_file "Exposed paths (.git/.env/backups/status)" "$RUN/04-web/exposures.txt"
   section_file "Favicon hashes (mmh3)" "$RUN/04-web/favicon.txt"
@@ -227,6 +231,17 @@ t_markdown() {
     section_file "noseyparker report" "$RUN/secrets_report.txt"
   fi
 
+  # Per-phase AI analysis (if AI was enabled this run) -----------------------
+  if ls "$RUN/ai"/0*-*.md >/dev/null 2>&1; then
+    emit ""; emit "## AI Per-Phase Analysis"
+    emit ""; emit "_AI-generated triage, one file per phase. Guidance only — validate against the evidence above._"
+    local aimd
+    for aimd in "$RUN/ai"/0*-*.md; do
+      [[ -s "$aimd" ]] && emit "- \`$aimd\`"
+    done
+  fi
+  emit ""
+
   emit "---"
   emit "_Recon-only engagement. All findings are observations or detections;"
   emit "no exploitation was performed. Validate every detection within your RoE_"
@@ -255,5 +270,6 @@ t_html() {
 
 task secret_scan "Scan collected loot for secrets (noseyparker)" t_secret_scan
 task markdown    "Build consolidated REPORT.md"                  t_markdown
+task ai_summary  "AI: executive summary (injected into REPORT)"  ai_exec_summary
 task html        "Render HTML reports (nmap + nuclei)"           t_html
 run_tasks

@@ -88,6 +88,53 @@ python3 reporting/nmap2html.py   -i loot/run -o nmap_report.html
 python3 reporting/nuclei2html.py -i loot/run -o web_report.html
 ```
 
+## AI augmentation (optional, Claude)
+
+Every phase can hand its output to Claude for triage. The AI sits **between**
+the tools: it reads a phase's evidence, ranks what matters, correlates across
+findings, and writes structured analysis to `loot/run/ai/`. It is a triage
+layer only — **the tools stay authoritative, the AI never scans or exploits,
+and nothing it returns is turned into a command.**
+
+```bash
+export AI_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-ant-...      # your enterprise/standard key
+./run.sh
+```
+
+Leave `AI_PROVIDER=none` (the default) and the kit behaves exactly as before.
+
+What you get per run (under `loot/run/ai/`):
+
+| Phase | AI output |
+|-------|-----------|
+| 02 portscan | service triage + `priority_hosts.txt` |
+| 03 smb-ad | interesting-share / exposure triage |
+| 04 web | tech-stack → **nuclei tags**, driving an *additive* `nuclei_ai.txt` pass; URL triage |
+| 05 db | database exposure triage |
+| 06 ad-recon | plain-English AD attack-surface narrative (hash **counts** only — hashes never sent) |
+| 07 vuln-scan | cross-correlated, prioritised detections |
+| 08 report | **executive summary** injected into `REPORT.md` (`ai/executive_summary.md`) |
+
+How it behaves, by design:
+
+- **Opt-in & non-fatal.** Off by default; if the API is unreachable the phase
+  logs a warning and continues — a phase never fails because of the AI.
+- **Additive, never subtractive.** The phase-04 AI nuclei pass adds templates
+  for the detected stack; the broad scan is unchanged, and AI-chosen tags are
+  sanitised to `[a-z0-9_-]` before they touch the command line.
+- **Privacy.** All evidence is bounded and run through a redactor
+  (`AI_REDACT_SECRETS=true`) that masks passwords/hashes/keys before sending;
+  raw hash files and the noseyparker secrets report are never sent at all. This
+  is client data leaving your box — get authorisation to use a cloud API on an
+  engagement, or leave it off.
+- **Auditable.** Every request/response is logged to `loot/run/ai/log/`, and
+  all AI output is clearly labelled `AI-generated` and flagged as triage, not
+  ground truth.
+
+Tunables live in `config.sh` under *AI augmentation* (`AI_MODEL`, `AI_EFFORT`,
+`AI_MAX_INPUT_CHARS`, `AI_NUCLEI_TAGS`, …). Default model: `claude-opus-4-8`.
+
 ## Notes
 
 - Tune `THREADS`, `MIN_RATE`, `NMAP_TIMING` **down** on fragile / segmented links.

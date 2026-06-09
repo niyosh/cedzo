@@ -57,3 +57,35 @@ VHOST_WORDLIST="${VHOST_WORDLIST:-}"
 # --- Extra recon engines (from the tool arsenal) ---------------------------
 WEB_CMS="${WEB_CMS:-false}"            # CMSeeK CMS enumeration in the web phase
 SECRET_SCAN="${SECRET_SCAN:-true}"     # noseyparker secret-scan over collected loot (phase 08)
+
+# ==========================================================================
+# --- AI augmentation (Claude) ---------------------------------------------
+# OPT-IN. When enabled, each phase sends a bounded, redacted digest of its
+# OWN output to Claude and writes structured analysis to $RUN/ai/. The AI is
+# a TRIAGE layer only: it ranks, correlates, and suggests next steps. It does
+# NOT scan, exploit, or execute anything — tool output stays authoritative,
+# and nothing the model returns is ever turned into a command.
+#
+# To turn it on:   export AI_PROVIDER=anthropic
+#                  export ANTHROPIC_API_KEY=sk-ant-...
+# Leave AI_PROVIDER=none (default) and the kit behaves exactly as before.
+# ==========================================================================
+AI_PROVIDER="${AI_PROVIDER:-none}"          # none | anthropic
+ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"  # your enterprise/standard key (read from env)
+AI_BASE_URL="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
+AI_MODEL="${AI_MODEL:-claude-opus-4-8}"     # analysis model
+AI_EFFORT="${AI_EFFORT:-high}"              # low | medium | high | max (Opus-tier)
+AI_MAX_TOKENS="${AI_MAX_TOKENS:-8000}"      # max output tokens per analysis call
+AI_TIMEOUT="${AI_TIMEOUT:-180}"            # per-request curl timeout (seconds)
+
+# Input bounding — keep per-call cost/latency sane on large runs.
+AI_MAX_INPUT_CHARS="${AI_MAX_INPUT_CHARS:-160000}" # total evidence per call (~40k tok)
+AI_PER_FILE_CHARS="${AI_PER_FILE_CHARS:-24000}"    # cap any single evidence file
+
+# Privacy controls — this is client data leaving your box. Redaction masks the
+# obvious secrets (passwords, hashes, keys) before anything is sent. Raw hash
+# files and the noseyparker secrets report are NEVER sent regardless.
+AI_REDACT_SECRETS="${AI_REDACT_SECRETS:-true}"
+
+# Per-feature toggles.
+AI_NUCLEI_TAGS="${AI_NUCLEI_TAGS:-true}"   # run an extra AI-targeted nuclei pass (additive)

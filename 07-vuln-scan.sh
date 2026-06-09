@@ -132,6 +132,7 @@ task bluekeep    "BlueKeep CVE-2019-0708 RDP safe-check"            t_bluekeep
 task nuclei_cve  "Targeted nuclei CVE sweep (log4j/proxyshell/...)" t_nuclei_cve
 task tls         "SSL/TLS hygiene audit (testssl/nmap)"             t_tls
 task snmp        "SNMP default community sweep + walk"              t_snmp
+task ai          "AI: correlate vuln detections"                   ai_bridge_07
 run_tasks
 
 ok "Vulnerability detection complete -> $OUT"

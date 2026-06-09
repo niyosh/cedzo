@@ -165,6 +165,7 @@ task smb_gpp    "GPP cpassword / autologin in SYSVOL"            t_smb_gpp
 task enum4linux "Per-host enum4linux-ng (parallel)"              t_enum4linux
 task ldap_dc    "DC LDAP rootDSE / anon bind / AXFR / dnsrecon"  t_ldap_dc
 task nfs        "NFS export enumeration (read-only mount/list)"  t_nfs
+task ai         "AI: triage shares / users / AD exposure"        ai_bridge_03
 run_tasks
 
 ok "SMB/AD enumeration complete -> $OUT"

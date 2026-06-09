@@ -89,3 +89,8 @@ run_tasks() {
   if [[ -n "$only" && "$ran" -eq 0 ]]; then err "No such sub-task: '$only'"; return 1; fi
   return 0
 }
+
+# ---- AI analysis layer ----------------------------------------------------
+# Sourced last so every phase gets the ai_* helpers / bridges. No-ops unless
+# AI_PROVIDER=anthropic and ANTHROPIC_API_KEY is set (see config.sh).
+source "$(dirname "${BASH_SOURCE[0]}")/ai.sh"

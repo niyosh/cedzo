@@ -191,6 +191,22 @@ t_nuclei() {
     -timeout "${NUCLEI_TIMEOUT:-10}" -retries 1 \
     -rl 150 -c 25 -o "$OUT/nuclei.txt" -stats 2>/dev/null || true
   ok "nuclei findings: $( [[ -f "$OUT/nuclei.txt" ]] && wc -l <"$OUT/nuclei.txt" || echo 0 )"
+
+  # AI-targeted supplementary pass. ADDITIVE — runs the templates matching the
+  # tech stack the AI inferred from the fingerprints (ai_bridge_04). It never
+  # replaces the broad scan above, so it can only add coverage, never remove it.
+  # Tags are re-sanitised here ([a-z0-9_-] only) before touching the command.
+  if [[ "${AI_NUCLEI_TAGS:-true}" == "true" && -s "$OUT/ai_nuclei_tags.txt" ]]; then
+    local t
+    t=$(grep -hoE '[a-z0-9_-]+' "$OUT/ai_nuclei_tags.txt" | sort -u | paste -sd, -)
+    if [[ -n "$t" ]]; then
+      log "AI-targeted nuclei pass (tags: $t)"
+      run "$LOG" nuclei -l "$targets" -tags "$t" \
+        -timeout "${NUCLEI_TIMEOUT:-10}" -retries 1 \
+        -rl 150 -c 25 -o "$OUT/nuclei_ai.txt" -stats 2>/dev/null || true
+      [[ -s "$OUT/nuclei_ai.txt" ]] && ok "AI-targeted nuclei findings: $(wc -l <"$OUT/nuclei_ai.txt") -> $OUT/nuclei_ai.txt"
+    fi
+  fi
 }
 
 task fingerprint "Probe + fingerprint (httpx, whatweb, favicon)"      t_fingerprint
@@ -202,7 +218,8 @@ task shortscan   "IIS 8.3 short-name disclosure (shortscan)"          t_shortsca
 task cmseek      "CMS enumeration (CMSeeK; needs WEB_CMS=true)"        t_cmseek
 task vhost       "Virtual-host discovery (ffuf; needs VHOST_WORDLIST)" t_vhost
 task crawl       "Crawl + content discovery -> nuclei_targets.txt"    t_crawl
-task nuclei      "Web vuln scan (nuclei)"                             t_nuclei
+task ai_triage   "AI: tech -> nuclei tags + URL triage"              ai_bridge_04
+task nuclei      "Web vuln scan (nuclei + AI-targeted pass)"         t_nuclei
 run_tasks
 
 ok "Web enumeration complete -> $OUT"

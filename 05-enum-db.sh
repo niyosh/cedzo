@@ -62,6 +62,7 @@ EOF
 task nse         "DB-specific NSE (info/empty-password/config)" t_nse
 task mssql       "MSSQL probe via netexec (null + creds)"       t_mssql
 task creds_notes "Write default-credential checklist (notes)"   t_creds_notes
+task ai          "AI: triage database exposure"                  ai_bridge_05
 run_tasks
 
 ok "DB enumeration complete -> $OUT"

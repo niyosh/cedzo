@@ -232,6 +232,7 @@ task delegation "Delegation enum (unconstrained/constrained/RBCD)"     t_delegat
 task sccm       "SCCM / MECM discovery (netexec)"                      t_sccm
 task timeroast  "Timeroast: collect machine-acct hashes (offline)"     t_timeroast
 task ldeep      "Full LDAP dump via ldeep (optional, read-only)"       t_ldeep
+task ai         "AI: summarise AD attack surface"                      ai_bridge_06
 run_tasks
 
 log "Crack any collected roast hashes OFFLINE (out of band):"

@@ -136,4 +136,5 @@ task discover     "Full TCP discovery (masscan/nmap) -> host_ports.txt" t_discov
 task service_scan "Service/version + NSE on open ports (nmap -sCV)"     t_service_scan
 task udp          "Top-100 UDP scan (skipped if SKIP_UDP=true)"         t_udp
 task classify     "Classify hosts by role + build web_urls.txt"         t_classify
+task ai           "AI: triage services + prioritise hosts"             ai_bridge_02
 run_tasks

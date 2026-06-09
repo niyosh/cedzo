@@ -113,6 +113,10 @@ print_summary() {
   echo "  - $RUN/04-web/nuclei.txt             (web findings)"
   echo "  - $RUN/06-ad-recon/*hashes.txt       (crack OFFLINE w/ hashcat)"
   echo "  - $RUN/05-db/db_nse.nmap             (empty-password DBs)"
+  if [[ "${AI_PROVIDER:-none}" == "anthropic" ]]; then
+    echo "  - $RUN/ai/executive_summary.md       (AI executive summary; also in REPORT.md)"
+    echo "  - $RUN/ai/0*-*.md                    (AI per-phase triage analysis)"
+  fi
 }
 
 # ---- Interactive sub-task menu: phase 00..08 -> sub-task -> run -----------
