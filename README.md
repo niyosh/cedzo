@@ -51,6 +51,8 @@ marker and are skipped next time; naming a phase explicitly re-runs it; delete
 Scope is authoritative; missing tools are skipped, not fatal. Regenerate the
 HTML reports standalone with `reporting/nmap2html.py` / `nuclei2html.py -i loot/run`.
 
+See [`FLOWCHART.md`](FLOWCHART.md) for a visual of the pipeline and AI flow.
+
 ## AI augmentation (optional)
 
 Each phase can hand its output to an LLM for triage: it ranks/correlates findings
