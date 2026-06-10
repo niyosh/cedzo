@@ -180,33 +180,33 @@ t_crawl() {
 }
 
 # ---- Sub-task: vuln scan (nuclei) -----------------------------------------
+# ONE nuclei run. If the AI (ai_bridge_04, runs before this) curated a genuine
+# URL list and/or tags, use them; otherwise fall back to the crawl-consolidated
+# list and a plain severity scan. Tags are folded into the same run — no second
+# pass.
 t_nuclei() {
   have nuclei || { warn "nuclei missing — skipping."; return 0; }
-  # Prefer the crawl-consolidated target list if it exists, else the live roots.
-  local targets="$LIVE_URLS"
-  [[ -s "$OUT/nuclei_targets.txt" ]] && targets="$OUT/nuclei_targets.txt"
-  log "nuclei (severity: ${NUCLEI_SEVERITY:-info,low,medium,high,critical}) over $(wc -l <"$targets") targets"
-  run "$LOG" nuclei -l "$targets" \
+
+  # Target list: AI-curated genuine URLs > crawl-consolidated list > live roots.
+  local targets="$LIVE_URLS" src="live roots"
+  [[ -s "$OUT/nuclei_targets.txt" ]]   && { targets="$OUT/nuclei_targets.txt";   src="crawl-consolidated"; }
+  if [[ "${AI_NUCLEI_TAGS:-true}" == "true" && -s "$OUT/ai_priority_urls.txt" ]]; then
+    targets="$OUT/ai_priority_urls.txt"; src="AI-curated"
+  fi
+
+  # AI tag focus, folded into the SAME run (re-sanitised to [a-z0-9_-]).
+  local TAGS=() t=""
+  if [[ "${AI_NUCLEI_TAGS:-true}" == "true" && -s "$OUT/ai_nuclei_tags.txt" ]]; then
+    t=$(grep -hoE '[a-z0-9_-]+' "$OUT/ai_nuclei_tags.txt" | sort -u | paste -sd, -)
+    [[ -n "$t" ]] && TAGS=(-tags "$t")
+  fi
+
+  log "nuclei (severity: ${NUCLEI_SEVERITY:-info,low,medium,high,critical}) over $(wc -l <"$targets") targets [$src]${t:+ + AI tags: $t}"
+  run "$LOG" nuclei -l "$targets" "${TAGS[@]}" \
     -severity "${NUCLEI_SEVERITY:-info,low,medium,high,critical}" \
     -timeout "${NUCLEI_TIMEOUT:-10}" -retries 1 \
     -rl 150 -c 25 -o "$OUT/nuclei.txt" -stats 2>/dev/null || true
   ok "nuclei findings: $( [[ -f "$OUT/nuclei.txt" ]] && wc -l <"$OUT/nuclei.txt" || echo 0 )"
-
-  # AI-targeted supplementary pass. ADDITIVE — runs the templates matching the
-  # tech stack the AI inferred from the fingerprints (ai_bridge_04). It never
-  # replaces the broad scan above, so it can only add coverage, never remove it.
-  # Tags are re-sanitised here ([a-z0-9_-] only) before touching the command.
-  if [[ "${AI_NUCLEI_TAGS:-true}" == "true" && -s "$OUT/ai_nuclei_tags.txt" ]]; then
-    local t
-    t=$(grep -hoE '[a-z0-9_-]+' "$OUT/ai_nuclei_tags.txt" | sort -u | paste -sd, -)
-    if [[ -n "$t" ]]; then
-      log "AI-targeted nuclei pass (tags: $t)"
-      run "$LOG" nuclei -l "$targets" -tags "$t" \
-        -timeout "${NUCLEI_TIMEOUT:-10}" -retries 1 \
-        -rl 150 -c 25 -o "$OUT/nuclei_ai.txt" -stats 2>/dev/null || true
-      [[ -s "$OUT/nuclei_ai.txt" ]] && ok "AI-targeted nuclei findings: $(wc -l <"$OUT/nuclei_ai.txt") -> $OUT/nuclei_ai.txt"
-    fi
-  fi
 }
 
 task fingerprint "Probe + fingerprint (httpx, whatweb, favicon)"      t_fingerprint

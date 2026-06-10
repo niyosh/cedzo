@@ -88,8 +88,9 @@ that pack into any AI, save its JSON reply to `loot/run/ai/xlsx-report.json`, th
 `./run.sh 09` renders the spreadsheet.
 
 **Guarantees:** evidence is redacted (`AI_REDACT_SECRETS`) and bounded before
-sending — raw hashes and the secrets report are never sent; the phase-04 nuclei
-pass is additive (never reduces coverage); every call is logged to
+sending — raw hashes and the secrets report are never sent; phase-04 nuclei runs
+once, on AI-curated genuine URLs + tags (intersected with discovered URLs,
+falling back to the full list); every call is logged to
 `loot/run/ai/log/` and output labelled AI-generated triage, not ground truth.
 Sending client data to a cloud API needs authorisation — otherwise use Ollama.
 Tunables live in `config.sh` under *AI augmentation*.

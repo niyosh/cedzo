@@ -104,7 +104,7 @@ AI_PER_FILE_CHARS="${AI_PER_FILE_CHARS:-24000}"    # cap any single evidence fil
 AI_REDACT_SECRETS="${AI_REDACT_SECRETS:-true}"
 
 # Per-feature toggles.
-AI_NUCLEI_TAGS="${AI_NUCLEI_TAGS:-true}"   # run an extra AI-targeted nuclei pass (additive)
+AI_NUCLEI_TAGS="${AI_NUCLEI_TAGS:-true}"   # let AI curate nuclei URLs + tags (single run; falls back to full list)
 
 # Final client XLSX report (phase 09). Bigger budgets — whole engagement in one
 # call. Needs python3 + openpyxl (auto-installed by phase 09 if missing).

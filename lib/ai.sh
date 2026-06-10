@@ -11,9 +11,10 @@
 #   * The AI is a TRIAGE/CORRELATION layer that sits BETWEEN phases. It reads
 #     a phase's evidence and writes structured JSON + Markdown to $RUN/ai/.
 #   * Tools remain ground truth. The model never scans, never exploits, and
-#     NOTHING it returns is turned into a shell command. The one place its
-#     output influences a tool (nuclei `-tags`) is sanitised to [a-z0-9_-]
-#     and runs as an ADDITIVE pass, so it can never reduce coverage.
+#     NOTHING it returns is turned into a shell command. Where its output feeds a
+#     tool (phase-04 nuclei: curated URL list + `-tags`), URLs are intersected
+#     with what was actually discovered and tags sanitised to [a-z0-9_-]; if the
+#     AI picks nothing, the scan falls back to the full consolidated list.
 #   * Failure is always non-fatal: every entry point returns 0/empty on any
 #     error so a phase never aborts because the API was down.
 #   * Privacy: all evidence passes through _ai_redact before it leaves the
@@ -420,8 +421,8 @@ credential leakage. Flag share names that commonly hold secrets." "$ev" || retur
 }
 
 # ---- Phase 04: web fingerprint -> nuclei targeting ------------------------
-# Runs BEFORE the nuclei sub-task so its tag suggestions can drive an extra,
-# additive nuclei pass. Sanitisation of tags happens at consumption time.
+# Runs BEFORE the nuclei sub-task so it can curate the genuine target URLs and
+# tags for nuclei's single run. Sanitisation happens at consumption time.
 ai_bridge_04() {
   ai_available || { log "AI off — skipping phase-04 analysis."; return 0; }
   local O="$RUN/04-web"
@@ -437,14 +438,30 @@ ai_bridge_04() {
     _ai_cat_glob "Earlier-phase AI findings" "$RUN/ai"/0*-*.json
   } | _ai_bound )
   _ai_phase 04-web "Phase 04 — Web Triage" "$(_schema_web)" \
-    "$_AI_PERSONA Focus: map the detected tech stack to the most relevant nuclei
-template TAGS (e.g. tomcat, jenkins, gitlab, wordpress, springboot, iis,
-exchange, fortinet, citrix) so a targeted scan can run. Return tags as lowercase
-nuclei tag tokens. Also list the highest-value URLs to review by hand." "$ev" || return 0
-  # Emit sanitised tag list for the (additive) AI-targeted nuclei pass.
+    "$_AI_PERSONA Focus: (1) map the detected tech stack to the most relevant
+nuclei template TAGS (e.g. tomcat, jenkins, gitlab, wordpress, springboot, iis,
+exchange, fortinet, citrix) as lowercase tag tokens. (2) In priority_urls,
+select the GENUINE, scan-worthy URLs from the discovered endpoints to feed nuclei
+— drop static assets (js/css/images/fonts), duplicates, and logout/destructive
+links; prefer app endpoints, admin/login/api/upload paths and parameterised URLs,
+keeping one representative per distinct route. Return ONLY URLs that appear
+verbatim in the evidence — these are passed straight to the scanner." "$ev" || return 0
+  # Emit sanitised tag list, folded into the single nuclei run by t_nuclei.
   jq -r '.nuclei_tags[]?' "$RUN/ai/04-web.json" 2>/dev/null \
     | tr 'A-Z' 'a-z' | grep -oE '[a-z0-9_-]+' | sort -u > "$O/ai_nuclei_tags.txt" 2>/dev/null || true
   [[ -s "$O/ai_nuclei_tags.txt" ]] && ok "AI[04-web]: nuclei tags -> $O/ai_nuclei_tags.txt ($(wc -l <"$O/ai_nuclei_tags.txt"))"
+
+  # Emit AI-curated genuine URLs for nuclei. Intersect the AI's picks with what
+  # we ACTUALLY discovered (crawl + roots) so the scanner never sees a
+  # hallucinated URL — if the intersection is empty, t_nuclei falls back to the
+  # full consolidated list (current behaviour).
+  local disc; disc=$(mktemp)
+  cat "$O/nuclei_targets.txt" "$O/live_urls.txt" 2>/dev/null | sort -u > "$disc"
+  jq -r '.priority_urls[]?' "$RUN/ai/04-web.json" 2>/dev/null \
+    | grep -E '^https?://' | sort -u > "$O/.ai_urls_raw" 2>/dev/null || true
+  grep -Fxf "$disc" "$O/.ai_urls_raw" > "$O/ai_priority_urls.txt" 2>/dev/null || true
+  rm -f "$disc" "$O/.ai_urls_raw"
+  [[ -s "$O/ai_priority_urls.txt" ]] && ok "AI[04-web]: curated $(wc -l <"$O/ai_priority_urls.txt") genuine URLs -> $O/ai_priority_urls.txt"
   # Append the web-specific fields to the rendered markdown.
   {
     echo; echo "## AI-recommended nuclei tags"; echo
@@ -646,7 +663,6 @@ ai_xlsx_report() {
     _ai_cat_glob "03 anon LDAP"  "$RUN/03-smb-ad"/ldap_anon_*.txt
     _ai_cat_glob "03 DNS AXFR"   "$RUN/03-smb-ad"/axfr_*.txt
     _ai_cat "04 nuclei"          "$RUN/04-web/nuclei.txt"
-    _ai_cat "04 nuclei (AI)"     "$RUN/04-web/nuclei_ai.txt"
     _ai_cat "04 exposures"       "$RUN/04-web/exposures.txt"
     _ai_cat "04 httpx"           "$RUN/04-web/httpx.txt"
     _ai_cat "05 DB NSE"          "$RUN/05-db/db_nse.nmap"

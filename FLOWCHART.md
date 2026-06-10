@@ -65,8 +65,9 @@ flowchart TD
 
 ### Notes
 
-- **Phase 04 feedback:** the web AI maps the detected tech stack to nuclei tags
-  and runs an *additive* `nuclei_ai.txt` pass — it never replaces the broad scan.
+- **Phase 04 feedback:** the web AI curates the genuine target URLs (from the
+  katana/dir-enum list) and stack tags, which feed nuclei's **single** run; with
+  no AI it falls back to the full consolidated list.
 - **Compounding:** phases 04–07 feed earlier `ai/*.json` back in, so analysis
   builds up; 08–09 synthesise across everything.
 - **Privacy:** evidence is redacted + bounded before any send; raw hashes and the
