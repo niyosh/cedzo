@@ -67,17 +67,32 @@ SECRET_SCAN="${SECRET_SCAN:-true}"     # noseyparker secret-scan over collected 
 # NOT scan, exploit, or execute anything — tool output stays authoritative,
 # and nothing the model returns is ever turned into a command.
 #
-# To turn it on:   export AI_PROVIDER=anthropic
-#                  export ANTHROPIC_API_KEY=sk-ant-...
+# To turn it on:   export AI_PROVIDER=anthropic   (or openai | gemini | ollama)
+#                  export ANTHROPIC_API_KEY=sk-ant-...   (key for chosen provider)
 # Leave AI_PROVIDER=none (default) and the kit behaves exactly as before.
 # ==========================================================================
-AI_PROVIDER="${AI_PROVIDER:-none}"          # none | anthropic
-ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"  # your enterprise/standard key (read from env)
-AI_BASE_URL="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
-AI_MODEL="${AI_MODEL:-claude-opus-4-8}"     # analysis model
-AI_EFFORT="${AI_EFFORT:-high}"              # low | medium | high | max (Opus-tier)
-AI_MAX_TOKENS="${AI_MAX_TOKENS:-8000}"      # max output tokens per analysis call
-AI_TIMEOUT="${AI_TIMEOUT:-180}"            # per-request curl timeout (seconds)
+AI_PROVIDER="${AI_PROVIDER:-none}"   # none | anthropic | openai | gemini | ollama
+
+# API keys — only the SELECTED provider's key is needed. Ollama needs none.
+ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
+OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+GEMINI_API_KEY="${GEMINI_API_KEY:-}"
+
+# Model + endpoint. Leave BLANK to use the per-provider defaults (all chosen to
+# handle CEDZO's large context + strict-JSON workload — see README):
+#   anthropic -> claude-opus-4-8        openai -> gpt-5.5
+#   gemini    -> gemini-3.5-flash       ollama -> qwen3:30b-a3b  (256K ctx MoE)
+# Ollama default base URL is http://localhost:11434 (override via AI_BASE_URL).
+AI_MODEL="${AI_MODEL:-}"               # blank = provider default (see above)
+AI_BASE_URL="${AI_BASE_URL:-}"         # blank = provider default endpoint
+AI_EFFORT="${AI_EFFORT:-high}"         # anthropic only (low|medium|high|max); ignored elsewhere
+AI_MAX_TOKENS="${AI_MAX_TOKENS:-8000}" # max output tokens per analysis call
+AI_TIMEOUT="${AI_TIMEOUT:-180}"        # per-request curl timeout (seconds)
+
+# Ollama only: context window. Ollama defaults to ~4K and SILENTLY TRUNCATES big
+# inputs, so set it. 40960 covers the per-phase calls; raise toward 131072 for
+# the full phase-09 digest (needs RAM) or lower AI_REPORT_MAX_CHARS to fit.
+AI_OLLAMA_NUM_CTX="${AI_OLLAMA_NUM_CTX:-40960}"
 
 # Input bounding — keep per-call cost/latency sane on large runs.
 AI_MAX_INPUT_CHARS="${AI_MAX_INPUT_CHARS:-160000}" # total evidence per call (~40k tok)

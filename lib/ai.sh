@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # ==========================================================================
-# lib/ai.sh  -  Claude-backed analysis layer (sourced by lib/common.sh).
+# lib/ai.sh  -  LLM-backed analysis layer (sourced by lib/common.sh).
+#
+# Multi-provider: AI_PROVIDER selects anthropic | openai | gemini | ollama.
+# A single dispatcher (_ai_request) builds the provider-specific body, posts it,
+# and extracts the text. Anthropic/OpenAI/Ollama use native structured outputs
+# (same JSON-Schema dialect); Gemini uses JSON mode with the schema in-prompt.
 #
 # Design contract (read before touching this file):
 #   * The AI is a TRIAGE/CORRELATION layer that sits BETWEEN phases. It reads
@@ -14,17 +19,48 @@
 #   * Privacy: all evidence passes through _ai_redact before it leaves the
 #     box; raw hash files and the secrets report are never sent.
 #
-# Transport is raw HTTPS via curl + jq (this is a shell project), targeting
-# POST /v1/messages with structured outputs (output_config.format) so every
-# response is schema-valid JSON we can parse deterministically.
+# Transport is raw HTTP via curl + jq (this is a shell project). Every response
+# is coerced to JSON and validated before use.
 # ==========================================================================
+
+# ---- Provider resolution --------------------------------------------------
+# Default model per provider (AI_MODEL overrides). Ollama default favours a
+# capable-but-local model; see README for sizing guidance.
+_ai_model() {
+  if [[ -n "${AI_MODEL:-}" ]]; then printf '%s' "$AI_MODEL"; return; fi
+  case "${AI_PROVIDER:-none}" in
+    anthropic) printf 'claude-opus-4-8' ;;
+    openai)    printf 'gpt-5.5' ;;
+    gemini)    printf 'gemini-3.5-flash' ;;
+    ollama)    printf 'qwen3:30b-a3b' ;;
+    *)         printf 'claude-opus-4-8' ;;
+  esac
+}
+
+# Default API base per provider (AI_BASE_URL overrides).
+_ai_base() {
+  if [[ -n "${AI_BASE_URL:-}" ]]; then printf '%s' "${AI_BASE_URL%/}"; return; fi
+  case "${AI_PROVIDER:-none}" in
+    anthropic) printf 'https://api.anthropic.com' ;;
+    openai)    printf 'https://api.openai.com' ;;
+    gemini)    printf 'https://generativelanguage.googleapis.com' ;;
+    ollama)    printf 'http://localhost:11434' ;;
+    *)         printf 'https://api.anthropic.com' ;;
+  esac
+}
 
 # ---- Availability gate ----------------------------------------------------
 ai_available() {
-  [[ "${AI_PROVIDER:-none}" == "anthropic" ]] || return 1
-  [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { warn "AI: AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is empty — skipping."; return 1; }
   have curl || { warn "AI: curl not found — skipping AI analysis."; return 1; }
   have jq   || { warn "AI: jq not found — skipping AI analysis."; return 1; }
+  case "${AI_PROVIDER:-none}" in
+    anthropic) [[ -n "${ANTHROPIC_API_KEY:-}" ]] || { warn "AI: ANTHROPIC_API_KEY is empty — skipping."; return 1; } ;;
+    openai)    [[ -n "${OPENAI_API_KEY:-}"    ]] || { warn "AI: OPENAI_API_KEY is empty — skipping.";    return 1; } ;;
+    gemini)    [[ -n "${GEMINI_API_KEY:-}"    ]] || { warn "AI: GEMINI_API_KEY is empty — skipping.";    return 1; } ;;
+    ollama)    : ;;  # local; no key. Reachability is checked on first call.
+    none)      return 1 ;;
+    *)         warn "AI: unknown AI_PROVIDER='${AI_PROVIDER}' (use anthropic|openai|gemini|ollama)."; return 1 ;;
+  esac
   return 0
 }
 
@@ -148,33 +184,87 @@ cat <<'JSON'
 JSON
 }
 
-# ---- HTTP transport -------------------------------------------------------
-# _ai_post <name> <request-json>  ->  prints concatenated assistant text.
-# Retries rate-limit / overload; logs request+response under $RUN/ai/log.
-_ai_post() {
-  local name="$1" req="$2" attempt resp errtype
+# ---- HTTP transport (provider dispatcher) ---------------------------------
+# _ai_request <name> <system> <user> <schema>  ->  prints assistant text.
+# Builds the provider-specific request, POSTs with retries, extracts the text
+# payload. Logs request+response under $RUN/ai/log. All four providers are
+# asked for JSON; Anthropic/OpenAI/Ollama use native structured outputs (same
+# JSON-Schema dialect), Gemini uses JSON mode with the schema given in-prompt.
+_ai_request() {
+  local name="$1" sys="$2" usr="$3" schema="$4"
+  local provider="${AI_PROVIDER:-none}" model base body url ctype extract
   local logd="$RUN/ai/log"; mkdir -p "$logd"
+  model="$(_ai_model)"; base="$(_ai_base)"
+  local -a hdr=(-H "content-type: application/json")
+
+  case "$provider" in
+    anthropic)
+      url="$base/v1/messages"
+      hdr+=(-H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01")
+      extract='[.content[]? | select(.type=="text") | .text] | join("")'
+      body=$(jq -n --arg m "$model" --argjson mt "${AI_MAX_TOKENS:-8000}" --arg eff "${AI_EFFORT:-high}" \
+             --arg sys "$sys" --arg usr "$usr" --argjson schema "$schema" \
+             '{ model:$m, max_tokens:$mt, thinking:{type:"adaptive"}, system:$sys,
+                output_config:{ effort:$eff, format:{ type:"json_schema", schema:$schema } },
+                messages:[ {role:"user", content:$usr} ] }') ;;
+    openai)
+      url="$base/v1/chat/completions"
+      hdr+=(-H "authorization: Bearer $OPENAI_API_KEY")
+      extract='.choices[0].message.content // empty'
+      # GPT-5.x / reasoning models require max_completion_tokens (not max_tokens);
+      # reasoning effort defaults to medium (left unset to stay valid across models).
+      body=$(jq -n --arg m "$model" --argjson mt "${AI_MAX_TOKENS:-8000}" \
+             --arg sys "$sys" --arg usr "$usr" --argjson schema "$schema" \
+             '{ model:$m, max_completion_tokens:$mt,
+                messages:[ {role:"system", content:$sys}, {role:"user", content:$usr} ],
+                response_format:{ type:"json_schema",
+                  json_schema:{ name:"report", strict:true, schema:$schema } } }') ;;
+    gemini)
+      url="$base/v1beta/models/$model:generateContent"
+      hdr+=(-H "x-goog-api-key: $GEMINI_API_KEY")
+      extract='[.candidates[0].content.parts[]?.text] | join("")'
+      # Gemini's responseSchema uses a different dialect; instead give the schema
+      # in-prompt and force JSON output via responseMimeType.
+      body=$(jq -n --arg m "$model" --argjson mt "${AI_MAX_TOKENS:-8000}" \
+             --arg sys "$sys" --arg usr "$usr" --arg schema "$schema" \
+             '{ systemInstruction:{ parts:[ {text: ($sys + "\nReturn ONLY a JSON object that validates against this JSON Schema:\n" + $schema)} ] },
+                contents:[ {role:"user", parts:[ {text:$usr} ]} ],
+                generationConfig:{ responseMimeType:"application/json", maxOutputTokens:$mt } }') ;;
+    ollama)
+      url="$base/api/chat"
+      extract='.message.content // empty'
+      # num_ctx MUST be set — Ollama defaults to ~4K and silently truncates the
+      # large evidence digests otherwise. Raise AI_OLLAMA_NUM_CTX for phase 09.
+      body=$(jq -n --arg m "$model" --argjson np "${AI_MAX_TOKENS:-8000}" \
+             --argjson nc "${AI_OLLAMA_NUM_CTX:-40960}" \
+             --arg sys "$sys" --arg usr "$usr" --argjson schema "$schema" \
+             '{ model:$m, stream:false, format:$schema,
+                options:{ num_predict:$np, num_ctx:$nc },
+                messages:[ {role:"system", content:$sys}, {role:"user", content:$usr} ] }') ;;
+    *) warn "AI[$name]: unsupported provider '$provider'"; return 1 ;;
+  esac
+  [[ -n "$body" ]] || { warn "AI[$name]: failed to build request body"; return 1; }
+  printf '%s' "$body" > "$logd/$name.req.json"
+
+  local attempt resp errmsg
   for attempt in 1 2 3; do
-    resp=$(printf '%s' "$req" | curl -sS --max-time "${AI_TIMEOUT:-180}" \
-        -H "content-type: application/json" \
-        -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
-        "$AI_BASE_URL/v1/messages" --data-binary @- 2>/dev/null) || resp=""
+    resp=$(printf '%s' "$body" | curl -sS --max-time "${AI_TIMEOUT:-180}" \
+        "${hdr[@]}" "$url" --data-binary @- 2>/dev/null) || resp=""
     printf '%s' "$resp" > "$logd/$name.resp.json"
-    if [[ -z "$resp" ]]; then warn "AI[$name]: empty/failed response (attempt $attempt/3)"; sleep 3; continue; fi
-    if printf '%s' "$resp" | jq -e 'has("error")' >/dev/null 2>&1; then
-      errtype=$(printf '%s' "$resp" | jq -r '.error.type // "error"')
-      case "$errtype" in
-        rate_limit_error|overloaded_error|api_error)
-          warn "AI[$name]: $errtype (retry $attempt/3)"; sleep 5; continue ;;
-        *)
-          err "AI[$name]: $(printf '%s' "$resp" | jq -r '.error.type+": "+.error.message')"; return 1 ;;
-      esac
+    if [[ -z "$resp" ]]; then
+      warn "AI[$name]: empty/failed response from $provider (attempt $attempt/3)" >&2; sleep 3; continue
     fi
-    printf '%s' "$resp" | jq -r '[.content[]? | select(.type=="text") | .text] | join("")'
+    errmsg=$(printf '%s' "$resp" | jq -r 'if (type=="object" and has("error")) then (.error.message // (.error|tostring)) else empty end' 2>/dev/null || true)
+    if [[ -n "$errmsg" ]]; then
+      if printf '%s' "$errmsg" | grep -qiE 'rate|overload|quota|exhaust|unavailable|timeout|try again|50[0-9]'; then
+        warn "AI[$name]: $provider transient error: $errmsg (retry $attempt/3)" >&2; sleep 5; continue
+      fi
+      err "AI[$name]: $provider error: $errmsg"; return 1
+    fi
+    printf '%s' "$resp" | jq -r "$extract"
     return 0
   done
-  warn "AI[$name]: gave up after 3 attempts."; return 1
+  warn "AI[$name]: gave up after 3 attempts." >&2; return 1
 }
 
 # _ai_json <name> <system> <user-evidence> <schema-json>
@@ -182,19 +272,10 @@ _ai_post() {
 _ai_json() {
   local name="$1" system="$2" user="$3" schema="$4"
   local dir="$RUN/ai" logd="$RUN/ai/log"; mkdir -p "$dir" "$logd"
-  local req text
-  req=$(jq -n \
-        --arg m "$AI_MODEL" --argjson mt "${AI_MAX_TOKENS:-8000}" --arg eff "${AI_EFFORT:-high}" \
-        --arg sys "$system" --arg usr "$user" --argjson schema "$schema" \
-        '{ model:$m, max_tokens:$mt,
-           thinking:{type:"adaptive"},
-           system:$sys,
-           output_config:{ effort:$eff, format:{ type:"json_schema", schema:$schema } },
-           messages:[ {role:"user", content:$usr} ] }') \
-    || { warn "AI[$name]: failed to build request JSON"; return 1; }
-  printf '%s' "$req" > "$logd/$name.req.json"
-
-  text=$(_ai_post "$name" "$req") || return 1
+  local text
+  text=$(_ai_request "$name" "$system" "$user" "$schema") || return 1
+  # Models occasionally wrap JSON in ```json fences — strip them defensively.
+  text=$(printf '%s' "$text" | sed -E 's/^```[a-zA-Z]*[[:space:]]*//; s/```[[:space:]]*$//')
   if printf '%s' "$text" | jq -e . >/dev/null 2>&1; then
     printf '%s' "$text" | jq . > "$dir/$name.json"
     return 0
@@ -206,7 +287,7 @@ _ai_json() {
 
 # ---- Markdown rendering ----------------------------------------------------
 _ai_banner() {
-  printf '> ⚠️ **AI-generated** (model: `%s`). Triage guidance only — not a CVSS score and not ground truth. Validate every item against the linked evidence before acting.\n' "$AI_MODEL"
+  printf '> ⚠️ **AI-generated** (%s / `%s`). Triage guidance only — not a CVSS score and not ground truth. Validate every item against the linked evidence before acting.\n' "${AI_PROVIDER:-?}" "$(_ai_model)"
 }
 
 _ai_render_generic() {   # <json> <out.md> <title>
@@ -231,7 +312,7 @@ _ai_phase() {
   if [[ -z "${evidence//[[:space:]]/}" ]]; then
     log "AI[$name]: no evidence collected — skipping analysis."; return 1
   fi
-  log "AI[$name]: analysing $(printf '%s' "$evidence" | wc -c) bytes of evidence with $AI_MODEL ..."
+  log "AI[$name]: analysing $(printf '%s' "$evidence" | wc -c) bytes via ${AI_PROVIDER}/$(_ai_model) ..."
   _ai_json "$name" "$system" "$evidence" "$schema" || return 1
   _ai_render_generic "$RUN/ai/$name.json" "$RUN/ai/$name.md" "$title"
   ok "AI[$name]: analysis -> $RUN/ai/$name.md"

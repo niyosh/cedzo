@@ -66,7 +66,7 @@ runs a whole phase; the full chain is still `./run.sh` with no arguments.
 | 06 | ad-recon | kerbrute, AS-REP/Kerberoast, BloodHound (optional, `BLOODHOUND`), Certipy ADCS, LDAP recon, delegation/SCCM enum, Timeroast |
 | 07 | vuln-scan | MS17-010, SMBGhost, BlueKeep, Zerologon, PrintNightmare, PetitPotam, log4j/ProxyShell sweep, TLS, SNMP |
 | 08 | report | Top-Risks rollup → `REPORT.md` + `nmap_report.html` + `web_report.html` |
-| 09 | xlsx-report | **(AI)** archives the run, sends all results to Claude → client `pentest_vulnerability_report.xlsx` (findings register + attack chains) |
+| 09 | xlsx-report | **(AI)** archives the run, sends all results to the configured LLM → client `pentest_vulnerability_report.xlsx` (findings register + attack chains) |
 
 Scope is authoritative: every IP/CIDR in `scope.txt` is treated as live and
 scanned; nothing outside it is touched. Modules degrade gracefully — a missing
@@ -89,21 +89,81 @@ python3 reporting/nmap2html.py   -i loot/run -o nmap_report.html
 python3 reporting/nuclei2html.py -i loot/run -o web_report.html
 ```
 
-## AI augmentation (optional, Claude)
+## AI augmentation (optional)
 
-Every phase can hand its output to Claude for triage. The AI sits **between**
+Every phase can hand its output to an LLM for triage. The AI sits **between**
 the tools: it reads a phase's evidence, ranks what matters, correlates across
 findings, and writes structured analysis to `loot/run/ai/`. It is a triage
 layer only — **the tools stay authoritative, the AI never scans or exploits,
 and nothing it returns is turned into a command.**
 
+**Four providers** — pick one with `AI_PROVIDER`; only that provider's key is
+needed (Ollama needs none). Leave `AI_PROVIDER=none` (default) and the kit
+behaves exactly as before.
+
 ```bash
-export AI_PROVIDER=anthropic
-export ANTHROPIC_API_KEY=sk-ant-...      # your enterprise/standard key
+# Anthropic (Claude)
+export AI_PROVIDER=anthropic   ANTHROPIC_API_KEY=sk-ant-...
+
+# OpenAI
+export AI_PROVIDER=openai      OPENAI_API_KEY=sk-...
+
+# Google Gemini
+export AI_PROVIDER=gemini      GEMINI_API_KEY=...
+
+# Ollama (fully local — nothing leaves the box)
+export AI_PROVIDER=ollama      # ensure `ollama serve` is running
 ./run.sh
 ```
 
-Leave `AI_PROVIDER=none` (the default) and the kit behaves exactly as before.
+### Recommended models (per CEDZO's workload)
+
+CEDZO needs three things from a model: **large context** (phase 09 ships
+~100K tokens of combined evidence in one call), **strong reasoning** (attack-path
+synthesis / correlation), and **reliable strict-JSON** output. Defaults below are
+chosen to satisfy all three; the "budget" column is fine for the smaller
+per-phase calls but may struggle on the phase-09 register.
+
+| Provider | Default (`AI_MODEL`) — recommended | Context | Budget alternative | Key var |
+|----------|-----------------------------------|---------|--------------------|---------|
+| `anthropic` | `claude-opus-4-8` | 1M | `claude-sonnet-4-6` (1M, cheaper) | `ANTHROPIC_API_KEY` |
+| `openai` | `gpt-5.5` | 1M | `gpt-5.4-mini` (400K) | `OPENAI_API_KEY` |
+| `gemini` | `gemini-3.5-flash` | 1M | `gemini-2.5-flash` (1M) / `gemini-3.1-pro-preview` (2M, max reasoning) | `GEMINI_API_KEY` |
+| `ollama` | `qwen3:30b-a3b` (MoE, 256K ctx) | 256K | `qwen3:14b` / step up to `llama3.3:70b` | — (local) |
+
+> Model lineups move fast — these are current as of June 2026. Override any with
+> `AI_MODEL`, and the endpoint with `AI_BASE_URL` (e.g. a remote Ollama box or an
+> OpenAI-compatible gateway). Notes: GPT-5.x are reasoning models (the kit sends
+> `max_completion_tokens` and lets reasoning default to *medium*); Gemini 2.0
+> Flash was retired June 2026 — use 2.5/3.x.
+
+**Local (Ollama) sizing** — structured-output reliability and security reasoning
+both scale with size, so run the largest you can. The default `qwen3:30b-a3b` is
+a mixture-of-experts model: ~19 GB, 256K context, fast (≈3B active params), and
+strong at JSON/tool-calling — the best all-round local pick for CEDZO.
+
+| VRAM / RAM | `AI_MODEL` | Notes |
+|------------|-----------|-------|
+| 6–8 GB | `qwen3:8b` | works; may drift on the big phase-09 schema |
+| 16–24 GB | `qwen3:30b-a3b` *(default)* | MoE, 256K ctx — recommended baseline |
+| 24–32 GB | `qwen3:32b` or `gemma3:27b` | dense, strong reasoning |
+| 48 GB+ | `llama3.3:70b-instruct` / `qwen3.6:*` | closest to cloud quality locally |
+
+```bash
+ollama serve &                 # ensure the daemon is running
+ollama pull qwen3:30b-a3b      # then: AI_PROVIDER=ollama ./run.sh
+```
+
+**Ollama context gotcha:** Ollama silently caps context at ~4K unless told
+otherwise. The kit sets `num_ctx` via `AI_OLLAMA_NUM_CTX` (default 40960). The
+per-phase calls fit; for the full phase-09 digest raise it toward `131072` (needs
+RAM) **or** lower `AI_REPORT_MAX_CHARS` so the digest fits your context.
+
+Caveat: small local models occasionally drift on the large phase-09 schema — the
+kit strips code fences and validates JSON, but if a local run produces no
+`pentest_vulnerability_report.xlsx`, step up a model size or use a cloud provider
+for the final report only. For the **privacy** reasons below, Ollama is the right
+choice when sending client recon data to a cloud API isn't authorised.
 
 What you get per run (under `loot/run/ai/`):
 
@@ -116,7 +176,7 @@ What you get per run (under `loot/run/ai/`):
 | 06 ad-recon | plain-English AD attack-surface narrative (hash **counts** only — hashes never sent) |
 | 07 vuln-scan | cross-correlated, prioritised detections |
 | 08 report | **executive summary** injected into `REPORT.md` (`ai/executive_summary.md`) |
-| 09 xlsx-report | archives the run, sends **all** results to Claude → **client `pentest_vulnerability_report.xlsx`** (severity-ranked findings register + attack-path chains, matching the house template) |
+| 09 xlsx-report | archives the run, sends **all** results to the LLM → **client `pentest_vulnerability_report.xlsx`** (severity-ranked findings register + attack-path chains, matching the house template) |
 
 How it behaves, by design:
 
