@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==========================================================================
-# 00-prep.sh  -  Preflight checks + build live_hosts.txt from scope.txt.
+# 01-prep.sh  -  Preflight checks + build live_hosts.txt from scope.txt.
 #                All IPs in scope are treated as reachable; no ping gating.
 # ==========================================================================
 set -euo pipefail

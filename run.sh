@@ -3,7 +3,7 @@
 # run.sh  -  Orchestrator. Runs the recon phases in order against your scope.
 #
 #   ./run.sh                 # full recon chain (AD recon needs read-only creds)
-#   ./run.sh 00 02 04        # run only selected phases (forces re-run)
+#   ./run.sh 01 02 04        # run only selected phases (forces re-run)
 #   ./run.sh menu            # interactive menu: pick a phase, then a sub-task
 #
 # RECON-ONLY: no password spraying, no credential brute force, no service-
@@ -45,14 +45,14 @@ ok "Output directory: $RUN"
 exec > >(tee -a "$RUN/run.log") 2>&1   # full transcript
 
 # ---- Phase registry -------------------------------------------------------
-PHASE_ORDER=(00 02 03 04 05 06 07 08 09)
+PHASE_ORDER=(01 02 03 04 05 06 07 08 09)
 declare -A MODULE=(
-  [00]=00-prep.sh        [02]=02-portscan.sh   [03]=03-enum-smb-ad.sh
+  [01]=01-prep.sh        [02]=02-portscan.sh   [03]=03-enum-smb-ad.sh
   [04]=04-enum-web.sh    [05]=05-enum-db.sh    [06]=06-ad-recon.sh
   [07]=07-vuln-scan.sh   [08]=08-report.sh     [09]=09-xlsx-report.sh
 )
 declare -A PHASE_DESC=(
-  [00]="Preflight & live-host list"   [02]="Port & service scan"
+  [01]="Preflight & live-host list"   [02]="Port & service scan"
   [03]="SMB / AD enumeration"         [04]="Web enumeration"
   [05]="Database enumeration"         [06]="AD recon (roasting / BloodHound)"
   [07]="Vulnerability detection"      [08]="Consolidated reporting"
@@ -122,7 +122,7 @@ print_summary() {
   [[ -f "$RUN/cedzo_results.zip" ]] && echo "  - $RUN/cedzo_results.zip             (full run archive)"
 }
 
-# ---- Interactive sub-task menu: phase 00..08 -> sub-task -> run -----------
+# ---- Interactive sub-task menu: phase 01..09 -> sub-task -> run -----------
 task_submenu() {
   local p="$1" lines ids=() descs=() id desc i sel
   lines=$(phase_tasks "$p")

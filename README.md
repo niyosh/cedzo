@@ -32,7 +32,7 @@ chmod +x *.sh lib/*.sh
 ./run.sh
 
 # …or selected phases only (forces them to re-run)
-./run.sh 00 02 04 08
+./run.sh 01 02 04 08
 
 # …or drive it manually: pick a phase, then a single sub-task
 ./run.sh menu
@@ -48,7 +48,7 @@ phases and picks up at the first unfinished one. Naming phases explicitly
 
 ## Interactive menu (`./run.sh menu`)
 
-Manual, à-la-carte execution. The top level lists the phases (`00`–`08`, with a
+Manual, à-la-carte execution. The top level lists the phases (`01`–`09`, with a
 `✓` next to completed ones); choosing one lists its sub-tasks, and choosing a
 sub-task runs just that step. For example, phase `07` exposes `smb_nse`,
 `bluekeep`, `tls`, `snmp`, etc. — pick `bluekeep` to run only that check. `a`
@@ -58,7 +58,7 @@ runs a whole phase; the full chain is still `./run.sh` with no arguments.
 
 | # | Module | What it does |
 |---|--------|--------------|
-| 00 | prep | Validate scope, check tooling, build `live_hosts.txt` |
+| 01 | prep | Validate scope, check tooling, build `live_hosts.txt` |
 | 02 | portscan | Full TCP + top UDP, `nmap -sCV`, classify hosts by role, build `web_urls.txt` |
 | 03 | smb-ad | SMB/shares/RID, GPP cpassword, anon-LDAP dump, DNS AXFR + dnsrecon, NFS exports |
 | 04 | web | httpx/whatweb, gowitness, katana + feroxbuster crawl, exposures, favicon, wpscan, nuclei |
@@ -178,10 +178,36 @@ What you get per run (under `loot/run/ai/`):
 | 08 report | **executive summary** injected into `REPORT.md` (`ai/executive_summary.md`) |
 | 09 xlsx-report | archives the run, sends **all** results to the LLM → **client `pentest_vulnerability_report.xlsx`** (severity-ranked findings register + attack-path chains, matching the house template) |
 
+**Compounding analysis (online).** Phases 04–07 feed the *earlier phases'* AI
+findings into their own prompt, so the picture builds up: by phase 07 the model
+correlates vuln detections against the web/SMB/AD findings already triaged, and
+phases 08–09 synthesise across everything.
+
+### No AI configured? Manual / offline path
+
+With `AI_PROVIDER=none` (the default), phase 09 still **archives the run** and
+writes a **paste-ready prompt pack** instead of calling an API:
+
+```text
+loot/run/cedzo_results.zip              # full run, for your records / handoff
+loot/run/ai/offline/xlsx-report.prompt.md   # system + JSON schema + redacted evidence
+```
+
+To produce the report by hand:
+
+1. Open `loot/run/ai/offline/xlsx-report.prompt.md` (it's also inside the zip).
+2. Paste it into ChatGPT / Claude / Gemini / a local model — it returns JSON.
+3. Save that JSON to `loot/run/ai/xlsx-report.json`.
+4. Run `./run.sh 09` — it renders `pentest_vulnerability_report.xlsx` from your saved JSON.
+
+The evidence in the pack is already redacted and bounded exactly as it would be
+if sent automatically — review it before pasting into any third-party service.
+
 How it behaves, by design:
 
 - **Opt-in & non-fatal.** Off by default; if the API is unreachable the phase
-  logs a warning and continues — a phase never fails because of the AI.
+  logs a warning and continues — a phase never fails because of the AI. With no
+  provider set you still get the zip + manual prompt pack (above).
 - **Additive, never subtractive.** The phase-04 AI nuclei pass adds templates
   for the detected stack; the broad scan is unchanged, and AI-chosen tags are
   sanitised to `[a-z0-9_-]` before they touch the command line.

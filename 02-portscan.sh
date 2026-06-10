@@ -13,7 +13,7 @@ SCOPE_TMP=$(mktemp /tmp/scope_XXXXXX.txt)
 clean_scope > "$SCOPE_TMP"
 trap 'rm -f "$SCOPE_TMP"' EXIT
 LIVE="$RUN/live_hosts.txt"
-task_listing || [[ -s "$LIVE" ]] || { err "No live hosts. Run 00 first."; exit 1; }
+task_listing || [[ -s "$LIVE" ]] || { err "No live hosts. Run 01 first."; exit 1; }
 
 phase "Port & Service Scanning"
 

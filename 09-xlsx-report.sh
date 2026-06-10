@@ -47,7 +47,16 @@ t_ai_findings() {
 # ---- Sub-task: render the .xlsx from the AI JSON --------------------------
 t_render() {
   local j="$RUN/ai/xlsx-report.json"
-  [[ -s "$j" ]] || { warn "No AI findings JSON ($j) — skipping XLSX render (enable AI: AI_PROVIDER=anthropic)."; return 0; }
+  if [[ ! -s "$j" ]]; then
+    warn "No AI findings JSON yet ($j) — XLSX not rendered."
+    if [[ -s "$RUN/ai/offline/xlsx-report.prompt.md" ]]; then
+      log  "Manual path: paste $RUN/ai/offline/xlsx-report.prompt.md into an AI,"
+      log  "  save its JSON reply to $j, then re-run:  ./run.sh 09"
+    else
+      log  "Configure a provider (AI_PROVIDER=anthropic|openai|gemini|ollama) and re-run."
+    fi
+    return 0
+  fi
   have python3 || { warn "python3 missing — cannot render XLSX."; return 0; }
   # Best-effort openpyxl bootstrap (apt python3-openpyxl, or pip).
   if ! python3 -c 'import openpyxl' 2>/dev/null; then
@@ -63,10 +72,20 @@ t_render() {
   fi
 }
 
-task zip         "Archive full run results (zip/tar)"          t_zip
-task ai_findings "AI: author vulnerability register + chains"  t_ai_findings
-task render      "Render client .xlsx from AI findings"        t_render
+# Order matters: author (or write the offline pack) BEFORE zipping, so the zip
+# bundles the manual prompt pack too; render last.
+task ai_findings "AI: author register + chains (or offline pack)" t_ai_findings
+task zip         "Archive full run results (zip/tar)"             t_zip
+task render      "Render client .xlsx from AI findings"           t_render
 run_tasks
 
 ok "Final report module complete."
-[[ -s "$XLSX" ]] && ok "Deliverable: $XLSX"
+if [[ -s "$XLSX" ]]; then
+  ok "Deliverable: $XLSX"
+elif [[ -s "$RUN/ai/offline/xlsx-report.prompt.md" ]]; then
+  warn "No AI configured — manual report path:"
+  log  "  1. Open  $RUN/ai/offline/xlsx-report.prompt.md  (also inside the results zip)"
+  log  "  2. Paste it into ChatGPT / Claude / Gemini / a local model"
+  log  "  3. Save the JSON reply to  $RUN/ai/xlsx-report.json"
+  log  "  4. Run  ./run.sh 09   to render $XLSX"
+fi

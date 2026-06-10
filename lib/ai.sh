@@ -319,6 +319,48 @@ _ai_phase() {
   return 0
 }
 
+# ---- Offline pack ---------------------------------------------------------
+# When no AI provider is configured (or it's unavailable), write a single
+# paste-ready prompt file so the operator can run the analysis manually in any
+# chat UI / local model and drop the JSON reply back for rendering. Needs no
+# jq/curl/key — just the (already redacted) evidence + schema + instructions.
+_ai_offline_write() {
+  local name="$1" title="$2" system="$3" evidence="$4" schema="$5" savehint="$6"
+  local d="$RUN/ai/offline"; mkdir -p "$d"
+  local f="$d/$name.prompt.md"
+  {
+    echo "# CEDZO — manual AI prompt: $title"
+    echo
+    echo "No AI provider is configured (\`AI_PROVIDER=none\`), so this run could not"
+    echo "produce the AI analysis automatically. To generate it by hand:"
+    echo
+    echo "  1. Copy everything below the \`=== SYSTEM ===\` line into any AI"
+    echo "     (ChatGPT / Claude / Gemini / a local model)."
+    echo "  2. Save the JSON it returns to:"
+    echo
+    echo "         $savehint"
+    echo
+    echo "  3. Re-render the report:  ./run.sh 09"
+    echo
+    echo "The evidence below is already redacted and bounded the same way it would"
+    echo "be sent automatically. Review it before pasting into a third-party service."
+    echo
+    echo "=== SYSTEM ==="
+    printf '%s\n' "$system"
+    echo
+    echo "Return ONLY a JSON object that validates against this JSON Schema:"
+    echo '```json'
+    printf '%s\n' "$schema"
+    echo '```'
+    echo
+    echo "=== EVIDENCE ==="
+    printf '%s\n' "$evidence"
+  } > "$f"
+  warn "AI off — wrote manual prompt pack: $f"
+  log  "  → paste it into any AI, save the JSON reply to: $savehint, then: ./run.sh 09"
+  return 0
+}
+
 # Shared system-prompt preamble for the recon-triage persona.
 _AI_PERSONA='You are a senior penetration tester triaging the output of an
 internal-network RECON tool (discovery/enumeration only — no exploitation was
@@ -392,6 +434,7 @@ ai_bridge_04() {
     _ai_cat "shortscan" "$O/shortscan.txt"
     _ai_cat "discovered endpoints" "$O/nuclei_targets.txt"
     _ai_cat "live URLs" "$O/live_urls.txt"
+    _ai_cat_glob "Earlier-phase AI findings" "$RUN/ai"/0*-*.json
   } | _ai_bound )
   _ai_phase 04-web "Phase 04 — Web Triage" "$(_schema_web)" \
     "$_AI_PERSONA Focus: map the detected tech stack to the most relevant nuclei
@@ -419,6 +462,7 @@ ai_bridge_05() {
     _ai_cat "DB NSE" "$O/db_nse.nmap"
     _ai_cat "DB phase log" "$O/db.log"
     _ai_cat "DB hosts" "$RUN/hosts_db.txt"
+    _ai_cat_glob "Earlier-phase AI findings" "$RUN/ai"/0*-*.json
   } | _ai_bound )
   _ai_phase 05-db "Phase 05 — Database Triage" "$(_schema_generic)" \
     "$_AI_PERSONA Focus: empty/weak-password databases, exposed versions with
@@ -442,12 +486,15 @@ ai_bridge_06() {
     _ai_cat "SCCM/MECM" "$O/sccm.txt"
     _ai_cat "Validated users" "$O/valid_users.txt"
     [[ -d "$O/bloodhound" ]] && printf '\nBloodHound collection present: %s\n' "$O/bloodhound"
+    _ai_cat_glob "Earlier-phase AI findings" "$RUN/ai"/0*-*.json
   } | _ai_bound )
   _ai_phase 06-ad-recon "Phase 06 — AD Attack Surface" "$(_schema_generic)" \
     "$_AI_PERSONA Focus: build a plain-English picture of the AD attack surface —
 roastable accounts, ADCS ESC templates, delegation issues, credentials in LDAP
 descriptions — and the most likely privilege-escalation paths. Hashes are
-collected for offline cracking; reason from the counts, not the hashes." "$ev" || return 0
+collected for offline cracking; reason from the counts, not the hashes. Use the
+earlier-phase AI findings to connect AD weaknesses to hosts/services already
+flagged elsewhere." "$ev" || return 0
 }
 
 # ---- Phase 07: vuln-detection correlation ---------------------------------
@@ -462,12 +509,14 @@ ai_bridge_07() {
     _ai_cat "Critical web CVE sweep" "$O/nuclei_critical.txt"
     _ai_cat "SNMP hits" "$O/snmp_hits.txt"
     _ai_cat "TLS audit" "$O/tls_audit.txt"
+    _ai_cat_glob "Earlier-phase AI findings" "$RUN/ai"/0*-*.json
   } | _ai_bound )
   _ai_phase 07-vuln "Phase 07 — Vulnerability Correlation" "$(_schema_generic)" \
-    "$_AI_PERSONA Focus: correlate the non-exploitative detections into a
-prioritised picture (e.g. EternalBlue + signing-disabled + reachable shares =
-elevated risk). Call out false-positive-prone checks that need manual
-validation before reporting." "$ev" || return 0
+    "$_AI_PERSONA Focus: correlate the non-exploitative detections WITH the
+earlier-phase AI findings into a prioritised picture (e.g. EternalBlue +
+signing-disabled + a reachable share + a roastable admin = a chain worth
+flagging). Call out false-positive-prone checks that need manual validation
+before reporting." "$ev" || return 0
 }
 
 # ==========================================================================
@@ -576,7 +625,6 @@ JSON
 # Claude author the final findings register. Larger token/timeout budget than
 # the per-phase calls since this is the whole engagement in one shot.
 ai_xlsx_report() {
-  ai_available || { warn "AI off — the final XLSX report needs AI (set AI_PROVIDER=anthropic). Skipping."; return 0; }
   local ev; ev=$( {
     _ai_cat "Consolidated report" "$RUN/REPORT.md"
     _ai_cat_glob "Per-phase AI findings" "$RUN/ai"/0*-*.json
@@ -606,10 +654,7 @@ ai_xlsx_report() {
   } | head -c "${AI_REPORT_MAX_CHARS:-400000}" )
   [[ -n "${ev//[[:space:]]/}" ]] || { warn "AI[xlsx]: no evidence found — nothing to report."; return 0; }
 
-  log "AI[xlsx]: authoring the vulnerability register from $(printf '%s' "$ev" | wc -c) bytes ..."
-  # Wider budgets than per-phase calls (dynamic-scoped into _ai_json/_ai_post).
-  local AI_MAX_TOKENS="${AI_REPORT_MAX_TOKENS:-16000}" AI_TIMEOUT="${AI_REPORT_TIMEOUT:-300}"
-  _ai_json xlsx-report "$_AI_PERSONA
+  local sys="$_AI_PERSONA
 You are producing the FINAL client deliverable: a de-duplicated vulnerability
 register plus realistic attack chains, to be rendered into the standard report
 spreadsheet. Return ONLY the requested JSON.
@@ -624,8 +669,17 @@ Rules:
 - attack_chains = realistic initial-access -> escalation -> impact paths that
   CHAIN findings together; reference the findings in findings_used. These are
   hypotheses derived from recon (nothing was exploited) — phrase accordingly.
-- Ground everything strictly in the evidence; never invent hosts or results." \
-    "$ev" "$(_schema_xlsx)" || return 1
-  ok "AI[xlsx]: findings JSON -> $RUN/ai/xlsx-report.json"
+- Ground everything strictly in the evidence; never invent hosts or results."
+
+  if ai_available 2>/dev/null; then
+    log "AI[xlsx]: authoring the vulnerability register from $(printf '%s' "$ev" | wc -c) bytes via ${AI_PROVIDER}/$(_ai_model) ..."
+    # Wider budgets than per-phase calls (dynamic-scoped into _ai_json/_ai_request).
+    local AI_MAX_TOKENS="${AI_REPORT_MAX_TOKENS:-16000}" AI_TIMEOUT="${AI_REPORT_TIMEOUT:-300}"
+    _ai_json xlsx-report "$sys" "$ev" "$(_schema_xlsx)" || return 1
+    ok "AI[xlsx]: findings JSON -> $RUN/ai/xlsx-report.json"
+  else
+    _ai_offline_write xlsx-report "Final vulnerability register + attack chains" \
+      "$sys" "$ev" "$(_schema_xlsx)" "loot/run/ai/xlsx-report.json"
+  fi
   return 0
 }
