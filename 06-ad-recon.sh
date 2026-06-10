@@ -120,6 +120,8 @@ t_adcs() {
 
 # ---- Sub-task: BloodHound collection --------------------------------------
 t_bloodhound() {
+  [[ "${BLOODHOUND:-true}" == "true" ]] \
+    || { warn "BLOODHOUND=false in config — skipping BloodHound collection."; return 0; }
   [[ -n "$USERNAME" && ( -n "$PASSWORD" || -n "$NTHASH" ) ]] \
     || { warn "No domain creds set — skipping BloodHound."; return 0; }
   have bloodhound-python || { warn "bloodhound-python not installed — skipping."; return 0; }
@@ -200,28 +202,6 @@ t_timeroast() {
   [[ -s "$OUT/timeroast_hashes.txt" ]] && warn "Timeroast hashes -> $OUT/timeroast_hashes.txt (crack: hashcat -m 31300)"
 }
 
-# ---- Sub-task: full LDAP dump via ldeep (optional, read-only) -------------
-t_ldeep() {
-  have ldeep || { warn "ldeep not installed — skipping full LDAP dump."; return 0; }
-  local d="${DOMAIN:-domain.local}" D="$OUT/ldeep"; mkdir -p "$D"
-  log "Full LDAP dump via ldeep"
-  if [[ "$HAVE_CREDS" == true ]]; then
-    if [[ -n "$NTHASH" ]]; then
-      ldeep ldap -d "$d" -u "$USERNAME" -H "$NTHASH" -s "ldap://$DC1" all "$D/$d" 2>&1 | tee "$D/ldeep_output.txt" || true
-    else
-      ldeep ldap -d "$d" -u "$USERNAME" -p "$PASSWORD" -s "ldap://$DC1" all "$D/$d" 2>&1 | tee "$D/ldeep_output.txt" || true
-    fi
-  else
-    ldeep ldap -d "$d" -a -s "ldap://$DC1" all "$D/$d" 2>&1 | tee "$D/ldeep_output.txt" || true
-  fi
-  # Feed harvested usernames back into the shared list for AS-REP/Kerberoast.
-  if [[ -s "$D/${d}_users_all.lst" ]]; then
-    sort -u "$D/${d}_users_all.lst" "$RUN/domain_users.txt" -o "$RUN/domain_users.txt" 2>/dev/null \
-      || cp "$D/${d}_users_all.lst" "$RUN/domain_users.txt"
-    ok "ldeep harvested users merged into domain_users.txt"
-  fi
-}
-
 task kerbrute   "Validate usernames via Kerberos pre-auth (kerbrute)"  t_kerbrute
 task asrep      "AS-REP roasting (no creds; offline hashes)"           t_asrep
 task kerberoast "Kerberoasting (needs read-only domain creds)"         t_kerberoast
@@ -231,7 +211,6 @@ task ldap_recon "LDAP recon: DC-list, MAQ, subnets, desc passwords"    t_ldap_re
 task delegation "Delegation enum (unconstrained/constrained/RBCD)"     t_delegation
 task sccm       "SCCM / MECM discovery (netexec)"                      t_sccm
 task timeroast  "Timeroast: collect machine-acct hashes (offline)"     t_timeroast
-task ldeep      "Full LDAP dump via ldeep (optional, read-only)"       t_ldeep
 task ai         "AI: summarise AD attack surface"                      ai_bridge_06
 run_tasks
 

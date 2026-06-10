@@ -63,9 +63,10 @@ runs a whole phase; the full chain is still `./run.sh` with no arguments.
 | 03 | smb-ad | SMB/shares/RID, GPP cpassword, anon-LDAP dump, DNS AXFR + dnsrecon, NFS exports |
 | 04 | web | httpx/whatweb, gowitness, katana + feroxbuster crawl, exposures, favicon, wpscan, nuclei |
 | 05 | db | MSSQL/MySQL/PostgreSQL/Oracle/Mongo/Redis enum (no brute force) |
-| 06 | ad-recon | kerbrute, AS-REP/Kerberoast, BloodHound, Certipy ADCS, LDAP recon, delegation/SCCM enum, Timeroast, ldeep |
+| 06 | ad-recon | kerbrute, AS-REP/Kerberoast, BloodHound (optional, `BLOODHOUND`), Certipy ADCS, LDAP recon, delegation/SCCM enum, Timeroast |
 | 07 | vuln-scan | MS17-010, SMBGhost, BlueKeep, Zerologon, PrintNightmare, PetitPotam, log4j/ProxyShell sweep, TLS, SNMP |
 | 08 | report | Top-Risks rollup → `REPORT.md` + `nmap_report.html` + `web_report.html` |
+| 09 | xlsx-report | **(AI)** archives the run, sends all results to Claude → client `pentest_vulnerability_report.xlsx` (findings register + attack chains) |
 
 Scope is authoritative: every IP/CIDR in `scope.txt` is treated as live and
 scanned; nothing outside it is touched. Modules degrade gracefully — a missing
@@ -115,6 +116,7 @@ What you get per run (under `loot/run/ai/`):
 | 06 ad-recon | plain-English AD attack-surface narrative (hash **counts** only — hashes never sent) |
 | 07 vuln-scan | cross-correlated, prioritised detections |
 | 08 report | **executive summary** injected into `REPORT.md` (`ai/executive_summary.md`) |
+| 09 xlsx-report | archives the run, sends **all** results to Claude → **client `pentest_vulnerability_report.xlsx`** (severity-ranked findings register + attack-path chains, matching the house template) |
 
 How it behaves, by design:
 

@@ -73,7 +73,7 @@ t_enum4linux() {
 # ---- Sub-task: LDAP / Kerberos / DNS against DCs --------------------------
 t_ldap_dc() {
   [[ -s "$DC" ]] || { warn "No DC hosts — skipping LDAP/DNS enumeration."; return 0; }
-  local dc basedn dom cred
+  local dc basedn dom
   phase "Domain Controller LDAP enumeration"
   while read -r dc; do
     log "anonymous LDAP rootDSE / naming contexts on $dc"
@@ -117,15 +117,8 @@ t_ldap_dc() {
   done < "$DC"
   [[ -s "$RUN/domain_users.txt" ]] && sort -u -o "$RUN/domain_users.txt" "$RUN/domain_users.txt"
 
-  if [[ -n "$USERNAME" && ( -n "$PASSWORD" || -n "$NTHASH" ) ]] && have ldapdomaindump; then
-    log "Authenticated full domain dump (ldapdomaindump)"
-    cred="${PASSWORD:-}"; [[ -n "$NTHASH" ]] && cred=":$NTHASH"
-    while read -r dc; do
-      mkdir -p "$OUT/ldd_$dc"
-      run "$LOG" ldapdomaindump -u "$DOMAIN\\$USERNAME" -p "$cred" \
-        -o "$OUT/ldd_$dc" "$dc" || true
-    done < "$DC"
-  fi
+  # NOTE: authenticated full-directory dumping is intentionally left to phase 06
+  # BloodHound collection — running ldapdomaindump here just duplicates it noisily.
 }
 
 # ---- Sub-task: NFS export enumeration (read-only) -------------------------

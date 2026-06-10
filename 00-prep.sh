@@ -37,7 +37,7 @@ t_check_tools() {
     exit 1
   fi
   for tool in masscan crackmapexec netexec impacket-secretsdump nuclei \
-              ldeep impacket-findDelegation; do
+              impacket-findDelegation; do
     have "$tool" || warn "Optional tool not found: $tool (some phases will skip it)"
   done
   ok "Tool check complete"

@@ -78,23 +78,16 @@ t_nuclei_cve() {
 }
 
 # ---- Sub-task: SSL/TLS hygiene --------------------------------------------
-# Prefer testssl.sh (protocols, ciphers, cert, BEAST/ROBOT/Heartbleed
-# detection); fall back to nmap NSE when testssl is unavailable.
+# nmap ssl NSE: protocols, ciphers, cert details, DH params.
 t_tls() {
   [[ -s "$RUN/web_urls.txt" ]] || { warn "No web URLs — skipping TLS audit."; return 0; }
-  local TESTSSL=""; have testssl.sh && TESTSSL=testssl.sh || { have testssl && TESTSSL=testssl; }
-  log "TLS audit on HTTPS services${TESTSSL:+ (testssl.sh)}"
-  local hostport h p safe
+  have nmap || { warn "nmap missing — skipping TLS audit."; return 0; }
+  log "TLS audit on HTTPS services (nmap ssl NSE)"
+  local hostport h p
   grep '^https' "$RUN/web_urls.txt" | sed 's#https://##' | while read -r hostport; do
     h=${hostport%%:*}; p=${hostport##*:}; [[ "$p" == "$h" ]] && p=443
-    safe=$(sed 's#[^A-Za-z0-9]#_#g' <<<"${h}_${p}")
-    if [[ -n "$TESTSSL" ]]; then
-      "$TESTSSL" --quiet --color 0 --warnings off --severity LOW \
-        --jsonfile "$OUT/testssl_$safe.json" "$h:$p" >>"$OUT/tls_audit.txt" 2>/dev/null || true
-    elif have nmap; then
-      sudo nmap -Pn -p"$p" --script "ssl-enum-ciphers,ssl-cert,ssl-dh-params" "$h" \
-        >>"$OUT/tls_audit.txt" 2>/dev/null || true
-    fi
+    sudo nmap -Pn -p"$p" --script "ssl-enum-ciphers,ssl-cert,ssl-dh-params" "$h" \
+      >>"$OUT/tls_audit.txt" 2>/dev/null || true
   done
   ok "TLS audit -> $OUT/tls_audit.txt"
 }
@@ -130,7 +123,7 @@ task zerologon   "Zerologon safe-check against DCs"                 t_zerologon
 task smbghost    "SMBGhost CVE-2020-0796 detection"                 t_smbghost
 task bluekeep    "BlueKeep CVE-2019-0708 RDP safe-check"            t_bluekeep
 task nuclei_cve  "Targeted nuclei CVE sweep (log4j/proxyshell/...)" t_nuclei_cve
-task tls         "SSL/TLS hygiene audit (testssl/nmap)"             t_tls
+task tls         "SSL/TLS hygiene audit (nmap ssl NSE)"             t_tls
 task snmp        "SNMP default community sweep + walk"              t_snmp
 task ai          "AI: correlate vuln detections"                   ai_bridge_07
 run_tasks

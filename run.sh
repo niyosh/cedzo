@@ -45,17 +45,18 @@ ok "Output directory: $RUN"
 exec > >(tee -a "$RUN/run.log") 2>&1   # full transcript
 
 # ---- Phase registry -------------------------------------------------------
-PHASE_ORDER=(00 02 03 04 05 06 07 08)
+PHASE_ORDER=(00 02 03 04 05 06 07 08 09)
 declare -A MODULE=(
   [00]=00-prep.sh        [02]=02-portscan.sh   [03]=03-enum-smb-ad.sh
   [04]=04-enum-web.sh    [05]=05-enum-db.sh    [06]=06-ad-recon.sh
-  [07]=07-vuln-scan.sh   [08]=08-report.sh
+  [07]=07-vuln-scan.sh   [08]=08-report.sh     [09]=09-xlsx-report.sh
 )
 declare -A PHASE_DESC=(
   [00]="Preflight & live-host list"   [02]="Port & service scan"
   [03]="SMB / AD enumeration"         [04]="Web enumeration"
   [05]="Database enumeration"         [06]="AD recon (roasting / BloodHound)"
   [07]="Vulnerability detection"      [08]="Consolidated reporting"
+  [09]="Final XLSX report (AI)"
 )
 
 # Menu styling (bold tracks whether colours are enabled; BAR = left accent).
@@ -114,9 +115,11 @@ print_summary() {
   echo "  - $RUN/06-ad-recon/*hashes.txt       (crack OFFLINE w/ hashcat)"
   echo "  - $RUN/05-db/db_nse.nmap             (empty-password DBs)"
   if [[ "${AI_PROVIDER:-none}" == "anthropic" ]]; then
+    echo "  - $RUN/pentest_vulnerability_report.xlsx  (AI client report: findings + attack chains)"
     echo "  - $RUN/ai/executive_summary.md       (AI executive summary; also in REPORT.md)"
     echo "  - $RUN/ai/0*-*.md                    (AI per-phase triage analysis)"
   fi
+  [[ -f "$RUN/cedzo_results.zip" ]] && echo "  - $RUN/cedzo_results.zip             (full run archive)"
 }
 
 # ---- Interactive sub-task menu: phase 00..08 -> sub-task -> run -----------

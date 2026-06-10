@@ -217,7 +217,6 @@ t_markdown() {
   emit "- Timeroast hashes collected: **$tr** (\`hashcat -m 31300\`)"
   [[ -d "$RUN/06-ad-recon/bloodhound" ]] && emit "- BloodHound data: \`$RUN/06-ad-recon/bloodhound/\` (import into BloodHound GUI)"
   [[ -s "$RUN/06-ad-recon/adcs_summary.txt" ]] && emit "- ADCS vulnerable templates: \`$RUN/06-ad-recon/adcs_summary.txt\` (Certipy)"
-  [[ -d "$RUN/06-ad-recon/ldeep" ]] && emit "- ldeep full LDAP dump: \`$RUN/06-ad-recon/ldeep/\`"
   emit ""
   section_file "ADCS vulnerable templates (Certipy)" "$RUN/06-ad-recon/adcs_summary.txt"
   section_file "Passwords in LDAP descriptions / attributes" "$RUN/06-ad-recon/ldap/desc_creds.txt"

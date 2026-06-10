@@ -440,3 +440,111 @@ JSON. Be specific to the hosts/findings in the evidence." \
   fi
   ok "AI[exec]: executive summary -> $md (also injected into REPORT.md)"
 }
+
+# ==========================================================================
+# Final client deliverable: AI authors a de-duplicated vulnerability register
+# + attack chains, written to $RUN/ai/xlsx-report.json. The phase-09 script
+# then renders it into the house .xlsx via reporting/xlsx_report.py.
+# ==========================================================================
+_schema_xlsx() {
+cat <<'JSON'
+{
+  "type": "object", "additionalProperties": false,
+  "properties": {
+    "vulnerabilities": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "severity":       { "type": "string", "enum": ["CRITICAL","HIGH","MEDIUM","LOW","INFO"] },
+          "name":           { "type": "string" },
+          "cve_ref":        { "type": "string" },
+          "category":       { "type": "string" },
+          "affected_hosts": { "type": "string" },
+          "description":    { "type": "string" },
+          "impact":         { "type": "string" },
+          "remediation":    { "type": "string" },
+          "cvss":           { "type": "string" },
+          "tool_source":    { "type": "string" }
+        },
+        "required": ["severity","name","cve_ref","category","affected_hosts","description","impact","remediation","cvss","tool_source"]
+      }
+    },
+    "attack_chains": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "chain_name":         { "type": "string" },
+          "initial_access":     { "type": "string" },
+          "lateral_escalation": { "type": "string" },
+          "impact":             { "type": "string" },
+          "findings_used":      { "type": "string" },
+          "severity":           { "type": "string", "enum": ["CRITICAL","HIGH","MEDIUM","LOW","INFO"] }
+        },
+        "required": ["chain_name","initial_access","lateral_escalation","impact","findings_used","severity"]
+      }
+    }
+  },
+  "required": ["vulnerabilities","attack_chains"]
+}
+JSON
+}
+
+# Collect (almost) everything the run produced, redacted + bounded, and have
+# Claude author the final findings register. Larger token/timeout budget than
+# the per-phase calls since this is the whole engagement in one shot.
+ai_xlsx_report() {
+  ai_available || { warn "AI off — the final XLSX report needs AI (set AI_PROVIDER=anthropic). Skipping."; return 0; }
+  local ev; ev=$( {
+    _ai_cat "Consolidated report" "$RUN/REPORT.md"
+    _ai_cat_glob "Per-phase AI findings" "$RUN/ai"/0*-*.json
+    [[ -s "$RUN/ai/exec-summary.json" ]] && _ai_cat "Executive summary" "$RUN/ai/exec-summary.json"
+    _ai_cat "07 SMB vuln"        "$RUN/07-vuln/smb_vuln_summary.txt"
+    _ai_cat "07 netexec vuln"    "$RUN/07-vuln/nxc_vuln_summary.txt"
+    _ai_cat "07 SMBGhost"        "$RUN/07-vuln/smbghost.txt"
+    _ai_cat "07 BlueKeep"        "$RUN/07-vuln/bluekeep.txt"
+    _ai_cat "07 nuclei critical" "$RUN/07-vuln/nuclei_critical.txt"
+    _ai_cat "07 TLS audit"       "$RUN/07-vuln/tls_audit.txt"
+    _ai_cat "07 SNMP hits"       "$RUN/07-vuln/snmp_hits.txt"
+    _ai_cat "06 ADCS"            "$RUN/06-ad-recon/adcs_summary.txt"
+    _ai_cat "06 LDAP desc creds" "$RUN/06-ad-recon/ldap/desc_creds.txt"
+    _ai_cat "06 delegation"      "$RUN/06-ad-recon/findDelegation.txt"
+    _ai_cat "06 SCCM"            "$RUN/06-ad-recon/sccm.txt"
+    _ai_cat_glob "03 shares"     "$RUN/03-smb-ad"/shares*
+    _ai_cat "03 GPP creds"       "$RUN/03-smb-ad/gpp_creds.txt"
+    _ai_cat "03 NFS exports"     "$RUN/03-smb-ad/nfs_exports.txt"
+    _ai_cat_glob "03 anon LDAP"  "$RUN/03-smb-ad"/ldap_anon_*.txt
+    _ai_cat_glob "03 DNS AXFR"   "$RUN/03-smb-ad"/axfr_*.txt
+    _ai_cat "04 nuclei"          "$RUN/04-web/nuclei.txt"
+    _ai_cat "04 nuclei (AI)"     "$RUN/04-web/nuclei_ai.txt"
+    _ai_cat "04 exposures"       "$RUN/04-web/exposures.txt"
+    _ai_cat "04 httpx"           "$RUN/04-web/httpx.txt"
+    _ai_cat "05 DB NSE"          "$RUN/05-db/db_nse.nmap"
+    _ai_cat "02 host ports"      "$RUN/02-portscan/host_ports.txt"
+  } | head -c "${AI_REPORT_MAX_CHARS:-400000}" )
+  [[ -n "${ev//[[:space:]]/}" ]] || { warn "AI[xlsx]: no evidence found — nothing to report."; return 0; }
+
+  log "AI[xlsx]: authoring the vulnerability register from $(printf '%s' "$ev" | wc -c) bytes ..."
+  # Wider budgets than per-phase calls (dynamic-scoped into _ai_json/_ai_post).
+  local AI_MAX_TOKENS="${AI_REPORT_MAX_TOKENS:-16000}" AI_TIMEOUT="${AI_REPORT_TIMEOUT:-300}"
+  _ai_json xlsx-report "$_AI_PERSONA
+You are producing the FINAL client deliverable: a de-duplicated vulnerability
+register plus realistic attack chains, to be rendered into the standard report
+spreadsheet. Return ONLY the requested JSON.
+Rules:
+- One row per DISTINCT vulnerability/finding. Merge the same issue across hosts
+  into one row and list every affected host in affected_hosts (newline-separated).
+- severity = realistic impact on an internal engagement.
+- cvss = best-fit CVSS 3.1 base score as a string (e.g. \"9.8\"); empty string
+  if not applicable. cve_ref = CVE id or technique tag (ESC1, MS17-010, ...) or
+  empty. NEVER invent CVE ids unsupported by the evidence.
+- tool_source = the tool that produced the finding (from the evidence).
+- attack_chains = realistic initial-access -> escalation -> impact paths that
+  CHAIN findings together; reference the findings in findings_used. These are
+  hypotheses derived from recon (nothing was exploited) — phrase accordingly.
+- Ground everything strictly in the evidence; never invent hosts or results." \
+    "$ev" "$(_schema_xlsx)" || return 1
+  ok "AI[xlsx]: findings JSON -> $RUN/ai/xlsx-report.json"
+  return 0
+}

@@ -36,6 +36,7 @@ USER_WORDLIST="${USER_WORDLIST:-/usr/share/seclists/Usernames/xato-net-10-millio
 # --- Behaviour flags -------------------------------------------------------
 SKIP_UDP="${SKIP_UDP:-false}"           # UDP scans are slow; set true to skip
 SCREENSHOTS="${SCREENSHOTS:-true}"      # web screenshots via gowitness
+BLOODHOUND="${BLOODHOUND:-true}"        # phase 06 BloodHound collection (needs read-only creds); set false to skip
 
 # --- Web crawling (katana + feroxbuster, feeds nuclei) ---------------------
 WEB_CRAWL="${WEB_CRAWL:-true}"          # crawl + content-discover before nuclei
@@ -89,3 +90,9 @@ AI_REDACT_SECRETS="${AI_REDACT_SECRETS:-true}"
 
 # Per-feature toggles.
 AI_NUCLEI_TAGS="${AI_NUCLEI_TAGS:-true}"   # run an extra AI-targeted nuclei pass (additive)
+
+# Final client XLSX report (phase 09). Bigger budgets — whole engagement in one
+# call. Needs python3 + openpyxl (auto-installed by phase 09 if missing).
+AI_REPORT_MAX_CHARS="${AI_REPORT_MAX_CHARS:-400000}"  # evidence digest cap (~100k tok)
+AI_REPORT_MAX_TOKENS="${AI_REPORT_MAX_TOKENS:-16000}" # max output tokens for the register
+AI_REPORT_TIMEOUT="${AI_REPORT_TIMEOUT:-300}"        # curl timeout for the report call (s)
