@@ -341,7 +341,7 @@ _ai_offline_write() {
     echo
     echo "         $savehint"
     echo
-    echo "  3. Re-render the report:  ./run.sh 09"
+    echo "  3. Re-render the report:  ./run.sh $KIT_MODE 09"
     echo
     echo "The evidence below is already redacted and bounded the same way it would"
     echo "be sent automatically. Review it before pasting into a third-party service."
@@ -358,7 +358,7 @@ _ai_offline_write() {
     printf '%s\n' "$evidence"
   } > "$f"
   warn "AI off — wrote manual prompt pack: $f"
-  log  "  → paste it into any AI, save the JSON reply to: $savehint, then: ./run.sh 09"
+  log  "  → paste it into any AI, save the JSON reply to: $savehint, then: ./run.sh $KIT_MODE 09"
   return 0
 }
 
@@ -695,7 +695,7 @@ Rules:
     ok "AI[xlsx]: findings JSON -> $RUN/ai/xlsx-report.json"
   else
     _ai_offline_write xlsx-report "Final vulnerability register + attack chains" \
-      "$sys" "$ev" "$(_schema_xlsx)" "loot/run/ai/xlsx-report.json"
+      "$sys" "$ev" "$(_schema_xlsx)" "$RUN/ai/xlsx-report.json"
   fi
   return 0
 }

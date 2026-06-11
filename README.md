@@ -31,21 +31,25 @@ KIT_MODE=external ./00-setup.sh                          # external toolset
 
 # 3) (optional) edit config.sh — threads, wordlists, creds, AI
 
-# 4) Run — mode is the first argument (omit it and run.sh asks)
-./run.sh                          # prompts internal/external, then full chain
-./run.sh internal                 # internal full chain
+# 4) Run — mode is the first argument (omit it and run.sh asks). run.sh then
+#    asks for a PROJECT name (or pass PROJECT=... in the environment).
+./run.sh                          # prompts mode + project, then full chain
+./run.sh internal                 # internal full chain (still asks for project)
 ./run.sh external                 # external full chain
 ./run.sh internal 01 02 04        # selected phases (forces re-run)
 ./run.sh external menu            # interactive: pick a phase → a sub-task
-KIT_MODE=external ./run.sh        # mode via environment instead of argument
+KIT_MODE=external PROJECT=acme ./run.sh   # mode + project via environment
 
 # Authenticated AD recon (internal; read-only creds; still no spraying/brute force):
 DOMAIN=CORP.LOCAL DC_IP=10.10.10.10 USERNAME=jdoe PASSWORD='Summer2025!' ./run.sh internal 03 06
 ```
 
-Output lands in `loot/run-internal/` or `loot/run-external/`. **Runs resume** —
-finished phases drop a `.done-NN` marker and are skipped next time; naming a
-phase explicitly re-runs it; delete the run dir to start fresh.
+Output is namespaced by project: `reconoutput/<project>/<mode>/`
+(e.g. `reconoutput/acme/internal/`). **Runs resume per project** — re-using a
+project name skips phases whose `.done-NN` marker is present; a **new** project
+name starts a fresh scan from phase 01. Internal and external each get their own
+sub-dir, so they resume independently. Naming a phase explicitly re-runs it;
+delete the project dir to start that project over.
 
 ## Phases
 
@@ -80,14 +84,14 @@ phase explicitly re-runs it; delete the run dir to start fresh.
 Scope is authoritative; missing tools are skipped, not fatal. External mode
 honours `PASSIVE_ONLY=true` (OSINT + passive sources only, no active scanning).
 Regenerate the HTML reports standalone with `reporting/nmap2html.py` /
-`nuclei2html.py -i loot/run-internal` (or `loot/run-external`).
+`nuclei2html.py -i reconoutput/<project>/<mode>`.
 
 See [`FLOWCHART.md`](FLOWCHART.md) for a visual of the pipeline and AI flow.
 
 ## AI augmentation (optional)
 
 Each phase can hand its output to an LLM for triage: it ranks/correlates findings
-and writes structured analysis to `loot/run/ai/`, phases 04–07 feed earlier
+and writes structured analysis to the run dir's `ai/`, phases 04–07 feed earlier
 findings forward, and phase 09 turns everything into the client `.xlsx`. The AI
 **never scans or exploits** and nothing it returns becomes a command. Off by
 default — leave `AI_PROVIDER=none` and the kit behaves exactly as before.
@@ -115,15 +119,15 @@ caps context at ~4K — the kit sets `num_ctx` via `AI_OLLAMA_NUM_CTX` (default
 
 **No AI? Manual path.** With no provider, phase 09 still writes the run archive
 (`*_results.zip`) + `ai/offline/xlsx-report.prompt.md` under the run dir
-(`loot/run-internal/` or `loot/run-external/`). Paste that pack into any AI, save
-its JSON reply to `<run-dir>/ai/xlsx-report.json`, then re-run phase 09
-(e.g. `./run.sh internal 09`) to render the spreadsheet.
+(`reconoutput/<project>/<mode>/`). Paste that pack into any AI, save its JSON
+reply to `<run-dir>/ai/xlsx-report.json`, then re-run phase 09 for the same
+project (e.g. `./run.sh internal 09`) to render the spreadsheet.
 
 **Guarantees:** evidence is redacted (`AI_REDACT_SECRETS`) and bounded before
 sending — raw hashes and the secrets report are never sent; phase-04 nuclei runs
 once, on AI-curated genuine URLs + tags (intersected with discovered URLs,
-falling back to the full list); every call is logged to
-`loot/run/ai/log/` and output labelled AI-generated triage, not ground truth.
+falling back to the full list); every call is logged to the run dir's
+`ai/log/` and output labelled AI-generated triage, not ground truth.
 Sending client data to a cloud API needs authorisation — otherwise use Ollama.
 Tunables live in `config.sh` under *AI augmentation*.
 

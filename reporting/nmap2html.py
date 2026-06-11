@@ -6,7 +6,7 @@
 # intelligence pass (legacy protocols, weak crypto, exposed DBs, NSE-derived
 # findings), scores per-host risk, and renders a single HTML report.
 #
-#   python3 nmap2html.py -i loot/run-<ts> -o nmap_report.html
+#   python3 nmap2html.py -i reconoutput/<project>/<mode> -o nmap_report.html
 # ==========================================================================
 
 import argparse

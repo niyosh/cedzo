@@ -5,7 +5,7 @@
 # Recursively parses nuclei text output under a run directory, groups findings
 # by host, dedupes templates, and renders a severity-sorted HTML report.
 #
-#   python3 nuclei2html.py -i loot/run-<ts> -o web_report.html
+#   python3 nuclei2html.py -i reconoutput/<project>/<mode> -o web_report.html
 # ==========================================================================
 
 import argparse

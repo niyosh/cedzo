@@ -26,9 +26,9 @@ KIT_MODE="${KIT_MODE:-internal}"
 #              resolved hosts are folded back into scope.
 SCOPE_FILE="${SCOPE_FILE:-scope.txt}"
 
-# Where all output lands (a mode-specific 'run-<mode>' dir is created
-# underneath; runs resume).
-OUTPUT_BASE="${OUTPUT_BASE:-./loot}"
+# Where all output lands. run.sh asks for a PROJECT name and creates
+# $OUTPUT_BASE/<project>/<mode>/ underneath; re-using a project name resumes it.
+OUTPUT_BASE="${OUTPUT_BASE:-./reconoutput}"
 
 # --- Engagement identity ---------------------------------------------------
 # [external] A primary root domain for the target org (drives subdomain/CT/email

@@ -118,12 +118,30 @@ fi
 read -rp "Type the word AUTHORISED to continue: " a
 [[ "$a" == "AUTHORISED" ]] || { err "Not confirmed. Exiting."; exit 1; }
 
-# ---- Run directory (STATIC, per-mode — re-runs resume from first unfinished
-# phase). A fixed directory means a second invocation reuses prior output: any
-# phase whose '.done' marker is present is skipped. Force a phase to re-run by
-# naming it explicitly (./run.sh <mode> 04) or by deleting its marker; start
-# fresh by removing the whole run dir. Internal and external use SEPARATE dirs.
-export RUN="$OUTPUT_BASE/run-$KIT_MODE"
+# ---- Project selection ----------------------------------------------------
+# The output is namespaced by a PROJECT name. Re-using a name RESUMES that
+# project (completed phases are skipped); a brand-new name starts a fresh scan.
+# Provide it non-interactively via the PROJECT env var, otherwise we prompt.
+PROJECT="${PROJECT:-}"
+if [[ -z "$PROJECT" ]]; then
+  read -rp "$(printf ' %sproject name%s (re-use to resume, new name to start fresh) ▸ ' "$C_CYN" "$C_RST")" PROJECT
+fi
+# Sanitise to a filesystem-safe slug: spaces -> '_', keep [A-Za-z0-9._-] only.
+PROJECT=$(printf '%s' "$PROJECT" | tr ' ' '_' | tr -cd 'A-Za-z0-9._-')
+[[ -n "$PROJECT" ]] || { err "A project name is required. Exiting."; exit 1; }
+
+# ---- Run directory (per project + mode — re-runs resume from the first
+# unfinished phase). Any phase whose '.done' marker is present is skipped, so a
+# re-run of the SAME project name picks up where it left off. Force a phase to
+# re-run by naming it explicitly (./run.sh <mode> 04) or by deleting its marker;
+# a NEW project name gets a fresh directory and runs from the beginning.
+# Internal and external live in separate sub-dirs so their markers never clash.
+export RUN="$OUTPUT_BASE/$PROJECT/$KIT_MODE"
+if [[ -d "$RUN" ]] && compgen -G "$RUN/.done-*" >/dev/null 2>&1; then
+  ok "Resuming project '$PROJECT' ($KIT_MODE) — completed phases will be skipped."
+else
+  ok "Starting new scan — project '$PROJECT' ($KIT_MODE)."
+fi
 mkdir -p "$RUN"
 cp "$SCOPE_FILE" "$RUN/scope.txt"
 ok "Output directory: $RUN"
