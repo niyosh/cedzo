@@ -39,6 +39,9 @@ if [[ "$KIT_MODE" == "external" ]]; then
     "subzy::go install github.com/LukaSikic/subzy@latest"
     "subjack::go install github.com/haccer/subjack@latest"
     "noseyparker:noseyparker:"
+    "glow:glow:"
+    "python3:python3:"
+    "zip:zip:"
   )
 else
   TOOLS=(
@@ -72,6 +75,10 @@ else
     "ntlmrecon:ntlmrecon:"
     "shortscan:shortscan:"
     "noseyparker:noseyparker:"
+    "cmseek:cmseek:"
+    "glow:glow:"
+    "python3:python3:"
+    "zip:zip:"
   )
 fi
 
@@ -89,8 +96,22 @@ fi
 if [[ ${#MISSING[@]} -eq 0 ]]; then ok "All tools present."; exit 0; fi
 
 echo
-read -rp "Attempt to install missing tools via apt/pipx? [y/N] " ans
-[[ "$ans" =~ ^[Yy]$ ]] || { warn "Skipping install. Some modules will degrade gracefully."; exit 0; }
+warn "${#MISSING[@]} tool(s) missing — modules that need them degrade gracefully."
+
+# Installing is OPT-IN and must never block a non-interactive run (piped, CI,
+# IDE terminal). Drive it with AUTO_INSTALL=1, or answer the prompt 'y' when
+# run from a real terminal. The `|| ans=...` keeps `set -e` from killing us if
+# read hits EOF (closed stdin), which would otherwise abort before the check.
+ans="${AUTO_INSTALL:-}"
+if [[ -z "$ans" ]]; then
+  if [[ -t 0 ]]; then
+    read -rp "Attempt to install missing tools via apt/pipx? [y/N] " ans || ans=""
+  else
+    log "Non-interactive shell — not installing. Re-run with AUTO_INSTALL=1 (or from a terminal) to install."
+    exit 0
+  fi
+fi
+[[ "$ans" =~ ^([Yy]|yes|1)$ ]] || { warn "Skipping install. Some modules will degrade gracefully."; exit 0; }
 
 sudo apt-get update -qq || true
 for entry in "${MISSING[@]}"; do
