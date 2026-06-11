@@ -93,4 +93,12 @@ run_tasks() {
 # ---- AI analysis layer ----------------------------------------------------
 # Sourced last so every phase gets the ai_* helpers / bridges. No-ops unless
 # AI_PROVIDER=anthropic and ANTHROPIC_API_KEY is set (see config.sh).
-source "$(dirname "${BASH_SOURCE[0]}")/ai.sh"
+#
+# The per-phase analysis functions are mode-specific (internal recon vs external
+# attack-surface), so we source the matching library. KIT_MODE is exported by
+# run.sh; a standalone phase invocation defaults to internal.
+if [[ "${KIT_MODE:-internal}" == "external" ]]; then
+  source "$(dirname "${BASH_SOURCE[0]}")/ai-ext.sh"
+else
+  source "$(dirname "${BASH_SOURCE[0]}")/ai.sh"
+fi

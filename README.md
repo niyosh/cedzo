@@ -1,40 +1,55 @@
-# Internal Recon Kit (CEDZO)
+# Recon Kit (CEDZO)
 
-Authorised internal-network reconnaissance, end to end:
-prep → port/service scan → SMB/AD → web → DB → AD recon → vuln detection →
-reporting → AI client report.
+Authorised reconnaissance, end to end, in two modes:
+
+- **internal** — internal-network recon: prep → port/service scan → SMB/AD → web
+  → DB → AD recon → vuln detection → reporting → AI client report.
+- **external** — external attack-surface recon: prep → OSINT → port/service scan
+  → web → exposed-service review → takeover/cloud → vuln detection → reporting →
+  AI client report.
+
+You pick the mode when you launch `run.sh` (it asks, or take it as the first
+argument). Each mode writes to its own run directory, so the two never collide.
 
 > **Recon-only by design.** Discovery, enumeration, fingerprinting, and
-> non-exploitative vulnerability *detection* only — no spraying, brute force,
-> relay, or disruptive actions. Use only against systems you are explicitly
-> authorised to test; `run.sh` requires a scope file and an `AUTHORISED`
-> confirmation before anything runs.
+> non-exploitative vulnerability *detection* only — no exploitation, spraying,
+> brute force, relay, or disruptive actions. Use only against systems you are
+> explicitly authorised to test; `run.sh` requires a scope file and an
+> `AUTHORISED` confirmation before anything runs.
 
 ## Quick start
 
 ```bash
-# 1) Scope — one IP / range / CIDR per line
+# 1) Scope — one target per line (see scope.txt.example)
+#    internal: IPs / ranges / CIDRs only
+#    external: public IPs / ranges / CIDRs and/or root domains
 printf '10.10.10.0/24\n192.168.50.10-50\n' > scope.txt
 
-# 2) Install/verify tooling
-chmod +x *.sh lib/*.sh && ./00-setup.sh
+# 2) Install/verify tooling for the mode you'll run
+chmod +x *.sh lib/*.sh && ./00-setup.sh                 # internal toolset
+KIT_MODE=external ./00-setup.sh                          # external toolset
 
 # 3) (optional) edit config.sh — threads, wordlists, creds, AI
 
-# 4) Run
-./run.sh                 # full chain
-./run.sh 01 02 04        # selected phases (forces re-run)
-./run.sh menu            # interactive: pick a phase → a sub-task
+# 4) Run — mode is the first argument (omit it and run.sh asks)
+./run.sh                          # prompts internal/external, then full chain
+./run.sh internal                 # internal full chain
+./run.sh external                 # external full chain
+./run.sh internal 01 02 04        # selected phases (forces re-run)
+./run.sh external menu            # interactive: pick a phase → a sub-task
+KIT_MODE=external ./run.sh        # mode via environment instead of argument
 
-# Authenticated AD recon (read-only creds; still no spraying/brute force):
-DOMAIN=CORP.LOCAL DC_IP=10.10.10.10 USERNAME=jdoe PASSWORD='Summer2025!' ./run.sh 03 06
+# Authenticated AD recon (internal; read-only creds; still no spraying/brute force):
+DOMAIN=CORP.LOCAL DC_IP=10.10.10.10 USERNAME=jdoe PASSWORD='Summer2025!' ./run.sh internal 03 06
 ```
 
-Output lands in `loot/run/`. **Runs resume** — finished phases drop a `.done-NN`
-marker and are skipped next time; naming a phase explicitly re-runs it; delete
-`loot/run/` to start fresh.
+Output lands in `loot/run-internal/` or `loot/run-external/`. **Runs resume** —
+finished phases drop a `.done-NN` marker and are skipped next time; naming a
+phase explicitly re-runs it; delete the run dir to start fresh.
 
 ## Phases
+
+**Internal mode**
 
 | # | Module | What it does |
 |---|--------|--------------|
@@ -48,8 +63,24 @@ marker and are skipped next time; naming a phase explicitly re-runs it; delete
 | 08 | report | `REPORT.md` + `nmap_report.html` + `web_report.html` |
 | 09 | xlsx-report | **(AI)** zips the run → client `pentest_vulnerability_report.xlsx` (findings + attack chains) |
 
-Scope is authoritative; missing tools are skipped, not fatal. Regenerate the
-HTML reports standalone with `reporting/nmap2html.py` / `nuclei2html.py -i loot/run`.
+**External mode**
+
+| # | Module | What it does |
+|---|--------|--------------|
+| 01 | prep | Validate + classify scope (IP/CIDR vs domain), check tooling, seed `live_hosts.txt` |
+| 02 | osint | WHOIS/ASN, DNS records, subdomain enum (subfinder/amass/crt.sh), reverse DNS, SPF/DKIM/DMARC; resolves names → folds public IPs into scope |
+| 03 | portscan | Rate-limited TCP (+ optional UDP), `nmap -sCV`, role classification, `web_urls.txt`, and `risky_services.txt` |
+| 04 | web | httpx/whatweb/favicon, gowitness, exposures, katana+feroxbuster crawl, wpscan, vhost, nuclei (+ AI-targeted pass) |
+| 05 | exposure | Internet-exposed RDP/SSH/VNC/WinRM, databases (info/empty-pass, no brute), FTP/SMB/NFS, edge/VPN appliance + admin-panel fingerprint, SNMP |
+| 06 | takeover-cloud | Dangling-CNAME + subdomain-takeover detection, S3/GCS/Azure bucket discovery, exposed `.git`/`.env` repos |
+| 07 | vuln-scan | nuclei CVE sweep, edge/VPN appliance CVE checks (Fortinet/Citrix/Pulse/F5/Exchange/…), TLS/SSL audit, SMTP open-relay |
+| 08 | report | `REPORT.md` + `nmap_report.html` + `web_report.html` |
+| 09 | xlsx-report | **(AI)** archives the run → client `pentest_vulnerability_report.xlsx` (findings + attack chains) |
+
+Scope is authoritative; missing tools are skipped, not fatal. External mode
+honours `PASSIVE_ONLY=true` (OSINT + passive sources only, no active scanning).
+Regenerate the HTML reports standalone with `reporting/nmap2html.py` /
+`nuclei2html.py -i loot/run-internal` (or `loot/run-external`).
 
 See [`FLOWCHART.md`](FLOWCHART.md) for a visual of the pipeline and AI flow.
 
@@ -82,10 +113,11 @@ biggest model you can (`qwen3:8b` min, `llama3.3:70b` ideal) and note it silentl
 caps context at ~4K — the kit sets `num_ctx` via `AI_OLLAMA_NUM_CTX` (default
 40960; raise for phase 09 or lower `AI_REPORT_MAX_CHARS`).
 
-**No AI? Manual path.** With no provider, phase 09 still writes
-`loot/run/cedzo_results.zip` + `loot/run/ai/offline/xlsx-report.prompt.md`. Paste
-that pack into any AI, save its JSON reply to `loot/run/ai/xlsx-report.json`, then
-`./run.sh 09` renders the spreadsheet.
+**No AI? Manual path.** With no provider, phase 09 still writes the run archive
+(`*_results.zip`) + `ai/offline/xlsx-report.prompt.md` under the run dir
+(`loot/run-internal/` or `loot/run-external/`). Paste that pack into any AI, save
+its JSON reply to `<run-dir>/ai/xlsx-report.json`, then re-run phase 09
+(e.g. `./run.sh internal 09`) to render the spreadsheet.
 
 **Guarantees:** evidence is redacted (`AI_REDACT_SECRETS`) and bounded before
 sending — raw hashes and the secrets report are never sent; phase-04 nuclei runs

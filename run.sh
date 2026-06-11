@@ -1,20 +1,84 @@
 #!/usr/bin/env bash
 # ==========================================================================
-# run.sh  -  Orchestrator. Runs the recon phases in order against your scope.
+# run.sh  -  Unified orchestrator. Runs the recon phases in order against your
+#            scope, in one of two MODES:
 #
-#   ./run.sh                 # full recon chain (AD recon needs read-only creds)
-#   ./run.sh 01 02 04        # run only selected phases (forces re-run)
-#   ./run.sh menu            # interactive menu: pick a phase, then a sub-task
+#     internal  -  internal network recon            (read-only creds optional)
+#     external  -  external attack-surface recon     (public IPs / root domains)
 #
-# RECON-ONLY: no password spraying, no credential brute force, no service-
-# disruptive actions. Authenticated phases require read-only domain creds.
+#   ./run.sh                      # ask internal/external, then full chain
+#   ./run.sh internal             # internal full chain
+#   ./run.sh external             # external full chain
+#   ./run.sh internal 01 02 04    # run only selected phases (forces re-run)
+#   ./run.sh external menu        # interactive menu: pick a phase, then a task
+#   KIT_MODE=external ./run.sh    # mode via environment instead of argument
+#
+# RECON-ONLY: no exploitation, no password spraying, no credential brute force,
+# no service-disruptive actions. Authenticated internal phases require read-only
+# domain creds. Each mode writes to its own run dir, so the two never collide.
 # ==========================================================================
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# ---- Mode selection -------------------------------------------------------
+# Priority: explicit first argument > KIT_MODE env > interactive prompt.
+normalise_mode() {
+  case "${1,,}" in
+    internal|int|i) echo internal ;;
+    external|ext|e|x) echo external ;;
+    *) echo "" ;;
+  esac
+}
+
+MODE=""
+if [[ $# -gt 0 ]]; then
+  m=$(normalise_mode "$1")
+  [[ -n "$m" ]] && { MODE="$m"; shift; }
+fi
+[[ -z "$MODE" && -n "${KIT_MODE:-}" ]] && MODE=$(normalise_mode "$KIT_MODE")
+
+if [[ -z "$MODE" ]]; then
+  printf 'Select engagement type:\n'
+  printf '  1) internal  — internal network recon\n'
+  printf '  2) external  — external attack-surface recon\n'
+  read -rp 'Mode [1/2]: ' msel
+  case "$msel" in
+    1|internal|int|i) MODE=internal ;;
+    2|external|ext|e|x) MODE=external ;;
+    *) echo "Unrecognised choice: '$msel'." >&2; exit 1 ;;
+  esac
+fi
+
+export KIT_MODE="$MODE"
 source ./config.sh
 source ./lib/common.sh
 
-BANNER=$(cat <<'B'
+# ---- Per-mode presentation, registry, warnings, summary -------------------
+if [[ "$KIT_MODE" == "external" ]]; then
+  BANNER=$(cat <<'B'
+  ___ _  _ _____ ___ ___ _  _   _   _      ___ ___ ___ ___  _  _
+ | __| |/ /_   _| __| _ \ \| | /_\ | |    | _ \ __/ __/ _ \| \| |
+ | _|| ' <  | | | _||   / .` |/ _ \| |__  |   / _| (_| (_) | .` |
+ |___|_|\_\ |_| |___|_|_\_|\_/_/ \_\____| |_|_\___\___\___/|_|\_|
+            external attack-surface recon kit  (recon-only)
+B
+)
+  MENU_TITLE='EXDZO · external attack-surface recon kit'
+  PHASE_ORDER=(01 02 03 04 05 06 07 08 09)
+  declare -A MODULE=(
+    [01]=x01-prep.sh        [02]=x02-osint.sh           [03]=x03-portscan.sh
+    [04]=x04-enum-web.sh    [05]=x05-exposure.sh        [06]=x06-takeover-cloud.sh
+    [07]=x07-vuln-scan.sh   [08]=x08-report.sh          [09]=x09-xlsx-report.sh
+  )
+  declare -A PHASE_DESC=(
+    [01]="Preflight & target normalisation"  [02]="OSINT / passive recon"
+    [03]="External port & service scan"      [04]="Web enumeration"
+    [05]="Internet-exposed service review"   [06]="Subdomain takeover / cloud"
+    [07]="Vulnerability detection"           [08]="Consolidated reporting"
+    [09]="Final XLSX report (AI)"
+  )
+else
+  BANNER=$(cat <<'B'
   ___ _  _ _____ ___ ___ _  _   _   _    ___ ___ ___ ___  _  _
  |_ _| \| |_   _| __| _ \ \| | /_\ | |  | _ \ __/ __/ _ \| \| |
   | || .` | | | | _||   / .` |/ _ \| |__|   / _| (_| (_) | .` |
@@ -22,42 +86,48 @@ BANNER=$(cat <<'B'
               internal network recon kit  (recon-only)
 B
 )
+  MENU_TITLE='CEDZO · internal network recon kit'
+  PHASE_ORDER=(01 02 03 04 05 06 07 08 09)
+  declare -A MODULE=(
+    [01]=01-prep.sh        [02]=02-portscan.sh   [03]=03-enum-smb-ad.sh
+    [04]=04-enum-web.sh    [05]=05-enum-db.sh    [06]=06-ad-recon.sh
+    [07]=07-vuln-scan.sh   [08]=08-report.sh     [09]=09-xlsx-report.sh
+  )
+  declare -A PHASE_DESC=(
+    [01]="Preflight & live-host list"   [02]="Port & service scan"
+    [03]="SMB / AD enumeration"         [04]="Web enumeration"
+    [05]="Database enumeration"         [06]="AD recon (roasting / BloodHound)"
+    [07]="Vulnerability detection"      [08]="Consolidated reporting"
+    [09]="Final XLSX report (AI)"
+  )
+fi
+
 printf '%s%s%s\n' "$C_CYN" "$BANNER" "$C_RST"
 
 # ---- Authorisation / scope gate ------------------------------------------
 require_scope
 N=$(clean_scope | wc -l)
-warn "Scope: $N entries from '$SCOPE_FILE'. This runs ACTIVE recon scanning against them."
-warn "Only proceed if you have WRITTEN authorisation covering every target."
+if [[ "$KIT_MODE" == "external" ]]; then
+  warn "Scope: $N entries from '$SCOPE_FILE'. This runs ACTIVE recon against INTERNET-FACING assets."
+  warn "Only proceed if you have WRITTEN authorisation covering every target IP/range/domain."
+  warn "External scanning crosses third-party networks — confirm your rules of engagement (rate limits, hours, source IP)."
+else
+  warn "Scope: $N entries from '$SCOPE_FILE'. This runs ACTIVE recon scanning against them."
+  warn "Only proceed if you have WRITTEN authorisation covering every target."
+fi
 read -rp "Type the word AUTHORISED to continue: " a
 [[ "$a" == "AUTHORISED" ]] || { err "Not confirmed. Exiting."; exit 1; }
 
-# ---- Run directory (STATIC — re-runs resume from the first unfinished phase)
-# A fixed directory means a second invocation reuses prior output: any phase
-# whose '.done' marker is present is skipped, so e.g. if 00/02/03 finished last
-# time, the run picks up at 04. Force a phase to re-run by naming it explicitly
-# (./run.sh 04) or by deleting its marker; start completely fresh by removing
-# the whole run dir ($OUTPUT_BASE/run).
-export RUN="$OUTPUT_BASE/run"
+# ---- Run directory (STATIC, per-mode — re-runs resume from first unfinished
+# phase). A fixed directory means a second invocation reuses prior output: any
+# phase whose '.done' marker is present is skipped. Force a phase to re-run by
+# naming it explicitly (./run.sh <mode> 04) or by deleting its marker; start
+# fresh by removing the whole run dir. Internal and external use SEPARATE dirs.
+export RUN="$OUTPUT_BASE/run-$KIT_MODE"
 mkdir -p "$RUN"
 cp "$SCOPE_FILE" "$RUN/scope.txt"
 ok "Output directory: $RUN"
 exec > >(tee -a "$RUN/run.log") 2>&1   # full transcript
-
-# ---- Phase registry -------------------------------------------------------
-PHASE_ORDER=(01 02 03 04 05 06 07 08 09)
-declare -A MODULE=(
-  [01]=01-prep.sh        [02]=02-portscan.sh   [03]=03-enum-smb-ad.sh
-  [04]=04-enum-web.sh    [05]=05-enum-db.sh    [06]=06-ad-recon.sh
-  [07]=07-vuln-scan.sh   [08]=08-report.sh     [09]=09-xlsx-report.sh
-)
-declare -A PHASE_DESC=(
-  [01]="Preflight & live-host list"   [02]="Port & service scan"
-  [03]="SMB / AD enumeration"         [04]="Web enumeration"
-  [05]="Database enumeration"         [06]="AD recon (roasting / BloodHound)"
-  [07]="Vulnerability detection"      [08]="Consolidated reporting"
-  [09]="Final XLSX report (AI)"
-)
 
 # Menu styling (bold tracks whether colours are enabled; BAR = left accent).
 C_BLD=''; [[ -n "$C_CYN" ]] && C_BLD=$'\e[1m'
@@ -106,20 +176,32 @@ print_summary() {
   ok "All output under: $RUN"
   echo
   log "Start with the consolidated report, then drill into the evidence:"
-  echo "  - $RUN/REPORT.md                     (consolidated recon summary, Markdown)"
-  echo "  - $RUN/nmap_report.html              (infrastructure intel + risk scores)"
-  echo "  - $RUN/web_report.html               (web vulnerabilities, severity-ranked)"
-  echo "  - $RUN/07-vuln/*_summary.txt         (EternalBlue/Zerologon/etc. detections)"
-  echo "  - $RUN/03-smb-ad/shares*             (readable shares, null sessions)"
-  echo "  - $RUN/04-web/nuclei.txt             (web findings)"
-  echo "  - $RUN/06-ad-recon/*hashes.txt       (crack OFFLINE w/ hashcat)"
-  echo "  - $RUN/05-db/db_nse.nmap             (empty-password DBs)"
+  if [[ "$KIT_MODE" == "external" ]]; then
+    echo "  - $RUN/REPORT.md                     (consolidated external recon summary, Markdown)"
+    echo "  - $RUN/nmap_report.html              (infrastructure intel + risk scores)"
+    echo "  - $RUN/web_report.html               (web vulnerabilities, severity-ranked)"
+    echo "  - $RUN/risky_services.txt            (services that should NOT face the Internet)"
+    echo "  - $RUN/05-exposure/*.txt             (exposed RDP/SSH/DB/appliances)"
+    echo "  - $RUN/06-takeover/takeover.txt      (subdomain-takeover candidates)"
+    echo "  - $RUN/07-vuln/nuclei_cve.txt        (high-impact external CVEs)"
+    echo "  - $RUN/02-osint/subdomains.txt       (discovered subdomains)"
+  else
+    echo "  - $RUN/REPORT.md                     (consolidated recon summary, Markdown)"
+    echo "  - $RUN/nmap_report.html              (infrastructure intel + risk scores)"
+    echo "  - $RUN/web_report.html               (web vulnerabilities, severity-ranked)"
+    echo "  - $RUN/07-vuln/*_summary.txt         (EternalBlue/Zerologon/etc. detections)"
+    echo "  - $RUN/03-smb-ad/shares*             (readable shares, null sessions)"
+    echo "  - $RUN/04-web/nuclei.txt             (web findings)"
+    echo "  - $RUN/06-ad-recon/*hashes.txt       (crack OFFLINE w/ hashcat)"
+    echo "  - $RUN/05-db/db_nse.nmap             (empty-password DBs)"
+  fi
   if [[ "${AI_PROVIDER:-none}" != "none" ]]; then
     echo "  - $RUN/pentest_vulnerability_report.xlsx  (AI client report: findings + attack chains)"
     echo "  - $RUN/ai/executive_summary.md       (AI executive summary; also in REPORT.md)"
     echo "  - $RUN/ai/0*-*.md                    (AI per-phase triage analysis)"
   fi
   [[ -f "$RUN/cedzo_results.zip" ]] && echo "  - $RUN/cedzo_results.zip             (full run archive)"
+  [[ -f "$RUN/exdzo_results.zip" ]] && echo "  - $RUN/exdzo_results.zip             (full run archive)"
 }
 
 # ---- Interactive sub-task menu: phase 01..09 -> sub-task -> run -----------
@@ -161,7 +243,7 @@ interactive_menu() {
   local p choice
   while true; do
     printf '\n %s\n' "$BAR"
-    printf ' %s  %s%sCEDZO%s %s· internal network recon kit%s\n' "$BAR" "$C_BLD" "$C_CYN" "$C_RST" "$C_DIM" "$C_RST"
+    printf ' %s  %s%s%s%s\n' "$BAR" "$C_BLD" "$C_CYN" "$MENU_TITLE" "$C_RST"
     printf ' %s  %spick a phase, then a sub-task — or run everything%s\n' "$BAR" "$C_DIM" "$C_RST"
     printf ' %s\n' "$BAR"
     for p in "${PHASE_ORDER[@]}"; do
