@@ -25,7 +25,7 @@ t_zip() {
   local zip="$RUN/exdzo_results.zip"
   log "Archiving run results"
   if have zip; then
-    ( cd "$RUN" && zip -rq "$zip" . -x 'exdzo_results.zip' 'ai/log/*' ) || true
+    ( cd "$RUN" && zip -rq exdzo_results.zip . -x 'exdzo_results.zip' 'ai/log/*' ) || true
     [[ -s "$zip" ]] && ok "Results archive -> $zip" || warn "zip produced no archive."
   elif have tar; then
     tar -czf "$RUN/exdzo_results.tar.gz" -C "$RUN" --exclude='./ai/log' . 2>/dev/null || true

@@ -143,6 +143,10 @@ else
   ok "Starting new scan — project '$PROJECT' ($KIT_MODE)."
 fi
 mkdir -p "$RUN"
+# Resolve RUN to an ABSOLUTE path. Phases that `cd` elsewhere (e.g. the phase-09
+# archive task does `cd "$RUN"`) must still be able to reference "$RUN", which a
+# relative path would break.
+RUN="$(cd "$RUN" && pwd)"; export RUN
 cp "$SCOPE_FILE" "$RUN/scope.txt"
 ok "Output directory: $RUN"
 exec > >(tee -a "$RUN/run.log") 2>&1   # full transcript
