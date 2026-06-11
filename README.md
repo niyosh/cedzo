@@ -73,7 +73,7 @@ delete the project dir to start that project over.
 |---|--------|--------------|
 | 01 | prep | Validate + classify scope (IP/CIDR vs domain), check tooling, seed `live_hosts.txt` |
 | 02 | osint | WHOIS/ASN, DNS records, subdomain enum (subfinder/amass/crt.sh), reverse DNS, SPF/DKIM/DMARC; resolves names → folds public IPs into scope |
-| 03 | portscan | Rate-limited TCP (+ optional UDP), `nmap -sCV`, role classification, `web_urls.txt`, and `risky_services.txt` |
+| 03 | portscan | Rate-limited full TCP sweep `-p-` (set `TCP_FULL=false` for fast top-ports) + optional UDP, `nmap -sCV`, role classification, `web_urls.txt`, and `risky_services.txt` |
 | 04 | web | httpx/whatweb/favicon, gowitness, exposures, katana+feroxbuster crawl, wpscan, vhost, nuclei (+ AI-targeted pass) |
 | 05 | exposure | Internet-exposed RDP/SSH/VNC/WinRM, databases (info/empty-pass, no brute), FTP/SMB/NFS, edge/VPN appliance + admin-panel fingerprint, SNMP |
 | 06 | takeover-cloud | Dangling-CNAME + subdomain-takeover detection, S3/GCS/Azure bucket discovery, exposed `.git`/`.env` repos |

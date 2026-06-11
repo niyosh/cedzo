@@ -52,9 +52,10 @@ else
 fi
 MAX_RETRIES="${MAX_RETRIES:-2}"   # [external] nmap --max-retries (drop on lossy WAN)
 
-# [external] Restrict the TCP scan to a fast, high-signal external port set
-# instead of all 65535. Set TCP_FULL=true for an exhaustive -p- sweep.
-TCP_FULL="${TCP_FULL:-false}"
+# [external] Full TCP sweep of all 65535 ports by default (matches internal
+# mode, just rate-limited for the public Internet). Set TCP_FULL=false to fall
+# back to a fast top-ports scan when time/stealth matters more than coverage.
+TCP_FULL="${TCP_FULL:-true}"
 TCP_TOP_PORTS="${TCP_TOP_PORTS:-1000}"  # nmap --top-ports when TCP_FULL=false
 
 # --- Active Directory credentials (OPTIONAL) -------------------------------
