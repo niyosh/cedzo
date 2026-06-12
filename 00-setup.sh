@@ -25,7 +25,6 @@ if [[ "$KIT_MODE" == "external" ]]; then
     "subfinder:subfinder:"
     "amass:amass:"
     "dnsx:dnsx:"
-    "httpx:httpx-toolkit:"
     "nuclei:nuclei:"
     "whatweb:whatweb:"
     "feroxbuster:feroxbuster:"
@@ -53,7 +52,6 @@ else
     "smbclient:smbclient:"
     "rpcclient:samba-common-bin:"
     "ldapsearch:ldap-utils:"
-    "httpx:httpx-toolkit:"
     "nuclei:nuclei:"
     "whatweb:whatweb:"
     "feroxbuster:feroxbuster:"
@@ -87,6 +85,15 @@ for entry in "${TOOLS[@]}"; do
   IFS=':' read -r bin apt hint <<<"$entry"
   if have "$bin"; then ok "$bin"; else warn "MISSING: $bin${hint:+   ($hint)}"; MISSING+=("$entry"); fi
 done
+
+# httpx handled separately: the binary name clashes with the python httpx CLI,
+# so resolve the ProjectDiscovery build via httpx_bin (prefers httpx-toolkit).
+if httpx_bin >/dev/null 2>&1; then
+  ok "$(httpx_bin) (ProjectDiscovery httpx)"
+else
+  warn "MISSING: ProjectDiscovery httpx   (install httpx-toolkit — the python 'httpx' CLI will NOT work)"
+  MISSING+=("httpx-toolkit:httpx-toolkit:")
+fi
 
 # netexec family handled separately (internal only)
 if [[ "$KIT_MODE" != "external" ]]; then

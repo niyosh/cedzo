@@ -36,6 +36,20 @@ nxc_bin() {
   else return 1; fi
 }
 
+# Resolve ProjectDiscovery's httpx (the HTTP probe/fingerprint tool the kit
+# uses), NOT the unrelated Python `httpx` HTTP-client CLI that shares the name.
+# On Kali the PD build is the `httpx-toolkit` package/binary, so prefer that;
+# otherwise accept a bare `httpx` only if its help advertises PD-specific flags
+# (so a python-httpx on PATH is correctly rejected and the phase degrades).
+HTTPX_BIN=""
+httpx_bin() {
+  [[ -n "$HTTPX_BIN" ]] && { echo "$HTTPX_BIN"; return 0; }
+  if have httpx-toolkit; then HTTPX_BIN=httpx-toolkit
+  elif have httpx && httpx -h 2>&1 | grep -qiE 'projectdiscovery|tech-detect'; then HTTPX_BIN=httpx
+  else return 1; fi
+  echo "$HTTPX_BIN"
+}
+
 # Run up to $THREADS jobs in parallel from stdin (one arg per line).
 # Usage:  cat hosts | parallelize my_func
 parallelize() {

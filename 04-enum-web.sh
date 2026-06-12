@@ -25,9 +25,11 @@ fi
 # services (e.g. Tomcat on 8180), and nmap -sCV already confirmed these ports
 # speak HTTP. Trusting nmap keeps every discovered web port in scope.
 t_fingerprint() {
-  if have httpx; then
-    log "httpx: titles, tech, status, redirects"
-    run "$LOG" httpx -silent -l "$URLS" \
+  local HX; HX=$(httpx_bin 2>/dev/null || true)
+  [[ -z "$HX" ]] && have httpx && warn "Found python 'httpx' on PATH, not ProjectDiscovery httpx — install httpx-toolkit. Skipping httpx steps."
+  if [[ -n "$HX" ]]; then
+    log "httpx ($HX): titles, tech, status, redirects"
+    run "$LOG" "$HX" -silent -l "$URLS" \
       -title -tech-detect -status-code -server -web-server -location -ip \
       -o "$OUT/httpx.txt" || true
   fi
@@ -36,9 +38,9 @@ t_fingerprint() {
     run "$LOG" whatweb -a3 --no-errors -i "$LIVE_URLS" \
       --log-brief="$OUT/whatweb.txt" || true
   fi
-  if have httpx; then
+  if [[ -n "$HX" ]]; then
     log "favicon hashing (mmh3)"
-    httpx -silent -l "$LIVE_URLS" -favicon -o "$OUT/favicon.txt" 2>/dev/null || true
+    "$HX" -silent -l "$LIVE_URLS" -favicon -o "$OUT/favicon.txt" 2>/dev/null || true
   fi
 }
 

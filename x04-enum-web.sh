@@ -29,10 +29,12 @@ if ! task_listing; then
   [[ -s "$OUT/targets_all.txt" ]] || { warn "No web targets (run 02/03 first). Skipping."; exit 0; }
   # Probe everything with httpx to keep only live web endpoints; fall back to
   # the raw IP:port list (already nmap-confirmed) if httpx is unavailable.
-  if have httpx; then
-    log "httpx liveness probe over $(wc -l <"$OUT/targets_all.txt") candidate URLs"
-    httpx -silent -l "$OUT/targets_all.txt" -o "$LIVE_URLS" 2>/dev/null || cp "$URLS" "$LIVE_URLS"
+  HX=$(httpx_bin 2>/dev/null || true)
+  if [[ -n "$HX" ]]; then
+    log "httpx ($HX) liveness probe over $(wc -l <"$OUT/targets_all.txt") candidate URLs"
+    "$HX" -silent -l "$OUT/targets_all.txt" -o "$LIVE_URLS" 2>/dev/null || cp "$URLS" "$LIVE_URLS"
   else
+    have httpx && warn "Found python 'httpx' on PATH, not ProjectDiscovery httpx — install httpx-toolkit."
     cp "$URLS" "$LIVE_URLS"
   fi
   [[ -s "$LIVE_URLS" ]] || cp "$URLS" "$LIVE_URLS"
@@ -41,9 +43,11 @@ fi
 
 # ---- Sub-task: probe + fingerprint (httpx / whatweb / favicon) ------------
 t_fingerprint() {
-  if have httpx; then
-    log "httpx: titles, tech, status, redirects"
-    run "$LOG" httpx -silent -l "$LIVE_URLS" \
+  local HX; HX=$(httpx_bin 2>/dev/null || true)
+  [[ -z "$HX" ]] && have httpx && warn "Found python 'httpx' on PATH, not ProjectDiscovery httpx — install httpx-toolkit. Skipping httpx steps."
+  if [[ -n "$HX" ]]; then
+    log "httpx ($HX): titles, tech, status, redirects"
+    run "$LOG" "$HX" -silent -l "$LIVE_URLS" \
       -title -tech-detect -status-code -server -web-server -location -ip \
       -o "$OUT/httpx.txt" || true
   fi
@@ -52,9 +56,9 @@ t_fingerprint() {
     run "$LOG" whatweb -a3 --no-errors -i "$LIVE_URLS" \
       --log-brief="$OUT/whatweb.txt" || true
   fi
-  if have httpx; then
+  if [[ -n "$HX" ]]; then
     log "favicon hashing (mmh3)"
-    httpx -silent -l "$LIVE_URLS" -favicon -o "$OUT/favicon.txt" 2>/dev/null || true
+    "$HX" -silent -l "$LIVE_URLS" -favicon -o "$OUT/favicon.txt" 2>/dev/null || true
   fi
 }
 
