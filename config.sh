@@ -108,19 +108,6 @@ NUCLEI_SEVERITY="${NUCLEI_SEVERITY:-info,low,medium,high,critical}"
 NUCLEI_TIMEOUT="${NUCLEI_TIMEOUT:-10}"  # per-request timeout (s); guards fragile hosts
 NUCLEI_RATELIMIT="${NUCLEI_RATELIMIT:-100}"  # [external] global requests/sec cap (be gentle)
 
-# --- OWASP ZAP web scan (spider + passive + active) ------------------------
-# ZAP runs headless (daemon) and is driven over its REST API: per web root it
-# spiders, passively scans, and — if ZAP_ACTIVE=true — runs an ACTIVE scan that
-# sends attack payloads (XSS/SQLi/etc.). The active part is intrusive, so only
-# enable it with authorisation. Output: $RUN/04-web/zap/zap_report.html.
-ZAP_SCAN="${ZAP_SCAN:-true}"               # master toggle for the ZAP sub-task
-ZAP_ACTIVE="${ZAP_ACTIVE:-true}"           # run the active scan; false = spider + passive only
-ZAP_AJAX_SPIDER="${ZAP_AJAX_SPIDER:-false}"   # also run the AJAX spider (JS apps; needs a browser)
-ZAP_MAX_TARGETS="${ZAP_MAX_TARGETS:-10}"      # cap web roots fed to ZAP (active scan is slow)
-ZAP_SPIDER_TIMEOUT="${ZAP_SPIDER_TIMEOUT:-5}" # minutes: max spider time per target
-ZAP_ACTIVE_TIMEOUT="${ZAP_ACTIVE_TIMEOUT:-20}" # minutes: max active-scan time per target
-ZAP_PORT="${ZAP_PORT:-8090}"               # local daemon port (bound to 127.0.0.1)
-
 # --- Subdomain takeover + cloud --------------------------------------------
 # [external]
 TAKEOVER_CHECK="${TAKEOVER_CHECK:-true}"   # dangling-CNAME / subdomain-takeover detection

@@ -20,7 +20,7 @@ if [[ "$KIT_MODE" == "external" ]]; then
     "nmap:nmap:"                 # x03 port/service scan, x07 TLS
     "whois:whois:"              # x02 WHOIS/ASN
     "dig:dnsutils:"             # x02 DNS records
-    "curl:curl:"                # x04 exposures, AI layer, ZAP API
+    "curl:curl:"                # x04 exposures, AI layer
     "jq:jq:"                    # AI layer (lib/ai-ext.sh)
     "subfinder:subfinder:"      # x02 subdomain enum
     "amass:amass:"              # x02 subdomain enum
@@ -32,7 +32,6 @@ if [[ "$KIT_MODE" == "external" ]]; then
     "gowitness:gowitness:"      # x04 screenshots
     "ffuf:ffuf:"                # x04 vhost discovery
     "wpscan:wpscan:"            # x04 WordPress
-    "zaproxy:zaproxy:"          # x04 OWASP ZAP (spider/passive/active)
     "testssl.sh:testssl.sh:"    # x07 TLS/SSL audit
     "onesixtyone:onesixtyone:"  # x05/x07 SNMP
     "showmount:nfs-common:"     # x05 NFS exposure
@@ -62,8 +61,7 @@ else
     "ntlmrecon:ntlmrecon:"      # 04 NTLM endpoint recon
     "shortscan:shortscan:"      # 04 IIS 8.3 short-name disclosure
     "cmseek:cmseek:"            # 04 CMS enum (optional, WEB_CMS=true)
-    "zaproxy:zaproxy:"          # 04 OWASP ZAP (spider/passive/active)
-    "curl:curl:"                # 04 exposures, AI layer, ZAP API
+    "curl:curl:"                # 04 exposures, AI layer
     "jq:jq:"                    # AI layer (lib/ai.sh)
     "kerbrute:kerbrute:"        # 06 user enum / AS-REP
     "bloodhound-python:bloodhound:bloodhound"      # 06 BloodHound collection

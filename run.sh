@@ -207,7 +207,6 @@ print_summary() {
     echo "  - $RUN/06-takeover/takeover.txt      (subdomain-takeover candidates)"
     echo "  - $RUN/07-vuln/nuclei_cve.txt        (high-impact external CVEs)"
     echo "  - $RUN/02-osint/subdomains.txt       (discovered subdomains)"
-    echo "  - $RUN/04-web/zap/zap_report.html    (OWASP ZAP: spider/passive/active findings)"
   else
     echo "  - $RUN/REPORT.md                     (consolidated recon summary, Markdown)"
     echo "  - $RUN/nmap_report.html              (infrastructure intel + risk scores)"
@@ -215,7 +214,6 @@ print_summary() {
     echo "  - $RUN/07-vuln/*_summary.txt         (EternalBlue/Zerologon/etc. detections)"
     echo "  - $RUN/03-smb-ad/shares*             (readable shares, null sessions)"
     echo "  - $RUN/04-web/nuclei.txt             (web findings)"
-    echo "  - $RUN/04-web/zap/zap_report.html    (OWASP ZAP: spider/passive/active findings)"
     echo "  - $RUN/06-ad-recon/*hashes.txt       (crack OFFLINE w/ hashcat)"
     echo "  - $RUN/05-db/db_nse.nmap             (empty-password DBs)"
   fi

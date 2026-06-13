@@ -194,13 +194,6 @@ t_nuclei() {
   fi
 }
 
-# ---- Sub-task: OWASP ZAP (spider + passive + active) ----------------------
-# Headless ZAP over the live web roots: spiders, passive-scans, and (unless
-# ZAP_ACTIVE=false) active-scans each target. See lib/zap.sh / config.sh.
-t_zap() {
-  zap_web_scan "$LIVE_URLS" "$OUT/zap"
-}
-
 # --- Task pipeline (passive identification -> discovery -> active scanning) -
 # Passive identification
 task fingerprint "Probe + fingerprint (httpx, whatweb, favicon)"      t_fingerprint
@@ -211,10 +204,9 @@ task wpscan      "WordPress passive deep-scan (wpscan)"               t_wpscan
 # Discovery / spidering
 task vhost       "Virtual-host discovery (ffuf; needs VHOST_WORDLIST)" t_vhost
 task crawl       "Crawl + content discovery -> nuclei_targets.txt"    t_crawl
-# Active vulnerability scanning
+# Vulnerability scanning
 task ai_triage   "AI: tech -> nuclei tags + URL triage"              ai_bridge_04
 task nuclei      "Web vuln scan (nuclei + AI-targeted pass)"         t_nuclei
-task zap         "OWASP ZAP spider + passive + active scan"           t_zap
 run_tasks
 
 ok "Web enumeration complete -> $OUT"
