@@ -1,7 +1,11 @@
-# Engagement output (loot is per-run, never commit)
+# Engagement output (per-run; never commit)
 loot/
+reconoutput/
 *.html
 scope.txt
+
+# Local secrets / overrides (credentials, API keys)
+.env
 
 # Python
 __pycache__/

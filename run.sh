@@ -104,6 +104,42 @@ fi
 
 printf '%s%s%s\n' "$C_CYN" "$BANNER" "$C_RST"
 
+# ---- Config sanity (advisory; never hard-fails) --------------------------
+validate_config
+
+# ---- Project selection ----------------------------------------------------
+# The output is namespaced by a PROJECT name. Re-using a name RESUMES that
+# project (completed phases AND sub-tasks are skipped); a brand-new name starts
+# a fresh scan. Provide it non-interactively via the PROJECT env var, else prompt.
+PROJECT="${PROJECT:-}"
+if [[ -z "$PROJECT" ]]; then
+  read -rp "$(printf ' %sproject name%s (re-use to resume, new name to start fresh) ▸ ' "$C_CYN" "$C_RST")" PROJECT
+fi
+# Sanitise to a filesystem-safe slug: spaces -> '_', keep [A-Za-z0-9._-] only.
+PROJECT=$(printf '%s' "$PROJECT" | tr ' ' '_' | tr -cd 'A-Za-z0-9._-')
+[[ -n "$PROJECT" ]] || { err "A project name is required. Exiting."; exit 1; }
+PROJECT_DIR="$OUTPUT_BASE/$PROJECT"
+
+# ---- Scope (per project) --------------------------------------------------
+# Each project keeps its OWN scope at <project>/scope.txt, shared by that
+# project's internal and external runs. First use seeds it from the root scope
+# (config's SCOPE_FILE); after that the project copy is authoritative, so editing
+# it never disturbs another engagement.
+PROJ_SCOPE="$PROJECT_DIR/scope.txt"
+if [[ -s "$PROJ_SCOPE" ]]; then
+  SCOPE_FILE="$PROJ_SCOPE"
+  ok "Using project scope: $PROJ_SCOPE"
+elif [[ -s "$SCOPE_FILE" ]]; then
+  mkdir -p "$PROJECT_DIR"
+  cp "$SCOPE_FILE" "$PROJ_SCOPE"
+  SCOPE_FILE="$PROJ_SCOPE"
+  ok "Seeded project scope from root scope.txt -> $PROJ_SCOPE (edit it for project-specific targets)"
+fi
+# Absolutise so phases that cd elsewhere still resolve it.
+_sdir="$(cd "$(dirname "$SCOPE_FILE")" 2>/dev/null && pwd || true)"
+[[ -n "$_sdir" ]] && SCOPE_FILE="$_sdir/$(basename "$SCOPE_FILE")"
+export SCOPE_FILE
+
 # ---- Authorisation / scope gate ------------------------------------------
 require_scope
 N=$(clean_scope | wc -l)
@@ -118,27 +154,15 @@ fi
 read -rp "Type the word AUTHORISED to continue: " a
 [[ "$a" == "AUTHORISED" ]] || { err "Not confirmed. Exiting."; exit 1; }
 
-# ---- Project selection ----------------------------------------------------
-# The output is namespaced by a PROJECT name. Re-using a name RESUMES that
-# project (completed phases are skipped); a brand-new name starts a fresh scan.
-# Provide it non-interactively via the PROJECT env var, otherwise we prompt.
-PROJECT="${PROJECT:-}"
-if [[ -z "$PROJECT" ]]; then
-  read -rp "$(printf ' %sproject name%s (re-use to resume, new name to start fresh) ▸ ' "$C_CYN" "$C_RST")" PROJECT
-fi
-# Sanitise to a filesystem-safe slug: spaces -> '_', keep [A-Za-z0-9._-] only.
-PROJECT=$(printf '%s' "$PROJECT" | tr ' ' '_' | tr -cd 'A-Za-z0-9._-')
-[[ -n "$PROJECT" ]] || { err "A project name is required. Exiting."; exit 1; }
-
 # ---- Run directory (per project + mode — re-runs resume from the first
-# unfinished phase). Any phase whose '.done' marker is present is skipped, so a
+# unfinished phase, and within a phase from the first unfinished sub-task). A
 # re-run of the SAME project name picks up where it left off. Force a phase to
-# re-run by naming it explicitly (./run.sh <mode> 04) or by deleting its marker;
-# a NEW project name gets a fresh directory and runs from the beginning.
-# Internal and external live in separate sub-dirs so their markers never clash.
-export RUN="$OUTPUT_BASE/$PROJECT/$KIT_MODE"
+# re-run by naming it explicitly (./run.sh <mode> 04) or deleting its marker; a
+# NEW project name gets a fresh directory and runs from the beginning. Internal
+# and external live in separate sub-dirs so their markers never clash.
+export RUN="$PROJECT_DIR/$KIT_MODE"
 if [[ -d "$RUN" ]] && compgen -G "$RUN/.done-*" >/dev/null 2>&1; then
-  ok "Resuming project '$PROJECT' ($KIT_MODE) — completed phases will be skipped."
+  ok "Resuming project '$PROJECT' ($KIT_MODE) — completed phases/sub-tasks will be skipped."
 else
   ok "Starting new scan — project '$PROJECT' ($KIT_MODE)."
 fi
@@ -155,30 +179,36 @@ exec > >(tee -a "$RUN/run.log") 2>&1   # full transcript
 C_BLD=''; [[ -n "$C_CYN" ]] && C_BLD=$'\e[1m'
 BAR="${C_CYN}┃${C_RST}"
 
-# Run one phase (all its sub-tasks). Writes a .done marker on success.
+# Run one phase (all its sub-tasks). Exports PHASE_ID so the sub-task framework
+# can drop per-task resume markers. fresh=1 (default) clears any prior sub-task
+# markers for this phase so it fully re-runs; fresh=0 keeps them so a phase that
+# died partway resumes at its first unfinished sub-task.
 run_phase() {
-  local p="$1" script="${MODULE[$1]:-}"
+  local p="$1" fresh="${2:-1}" script="${MODULE[$1]:-}"
   [[ -n "$script" ]] || { warn "Unknown phase '$p' — skipping."; return 0; }
+  if (( fresh )); then rm -f "$RUN/.tasks/$p-"*.done 2>/dev/null || true; fi
   phase "PHASE $p — $script"
-  if RUN="$RUN" bash "./$script"; then
+  if PHASE_ID="$p" RUN="$RUN" bash "./$script"; then
     touch "$RUN/.done-$p"
   else
-    warn "Phase $p exited non-zero — not marking complete; it will retry next run."
+    warn "Phase $p exited non-zero — not marking complete; it will retry (resuming sub-tasks) next run."
   fi
 }
 
 # Run a list of phases. In resume mode (explicit=false) phases with a .done
-# marker are skipped; explicit selection always re-runs.
+# marker are skipped and partial phases RESUME their sub-tasks (fresh=0);
+# explicit selection always re-runs the whole phase cleanly (fresh=1).
 run_phases() {
   local explicit="$1"; shift
-  local p
+  local p fresh=0
+  [[ "$explicit" == "true" ]] && fresh=1
   for p in "$@"; do
     [[ -n "${MODULE[$p]:-}" ]] || { warn "Unknown phase '$p' — skipping."; continue; }
     if [[ "$explicit" == "false" && -f "$RUN/.done-$p" ]]; then
       ok "PHASE $p — ${MODULE[$p]} already complete — skipping (rm $RUN/.done-$p to redo)."
       continue
     fi
-    run_phase "$p"
+    run_phase "$p" "$fresh"
   done
 }
 

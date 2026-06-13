@@ -1,0 +1,13 @@
+# shellcheck configuration for the recon kit.
+# Run: make lint   (or: shellcheck -x *.sh lib/*.sh)
+
+# Dynamic `source ./config.sh` / lib/*.sh paths can't be followed statically.
+disable=SC1090,SC1091
+
+# The kit intentionally sets many config vars that individual phases read only
+# conditionally; flagging each as "unused" is pure noise here.
+disable=SC2034
+
+# `local x=$(cmd)` masking the return value is acceptable throughout this
+# codebase — failures are handled by explicit `|| true` / guards, not $?.
+disable=SC2155

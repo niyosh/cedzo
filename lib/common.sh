@@ -94,15 +94,80 @@ run_tasks() {
     return 0
   fi
   local only="${TASK_ONLY:-}" ran=0
+
+  # ---- Sub-task resume ----------------------------------------------------
+  # On a normal full-phase run (no TASK_ONLY) launched via run.sh, PHASE_ID is
+  # exported and we drop a per-task marker on success. A phase that died partway
+  # therefore resumes at the first UNFINISHED task next time instead of redoing
+  # the whole phase. Marker logic is OFF for single-task (menu) runs and when
+  # PHASE_ID/RUN are absent (a phase run standalone behaves exactly as before).
+  local use_markers=0 tdir="" marker=""
+  if [[ -z "$only" && -n "${PHASE_ID:-}" && -n "${RUN:-}" ]]; then
+    use_markers=1; tdir="$RUN/.tasks"; mkdir -p "$tdir" 2>/dev/null || true
+  fi
+
   for id in "${_TASK_IDS[@]}"; do
     [[ -n "$only" && "$only" != "$id" ]] && continue
+    if (( use_markers )); then
+      marker="$tdir/${PHASE_ID}-${id}.done"
+      if [[ -f "$marker" ]]; then
+        ok "sub-task '$id' already complete — skipping (rm $marker to redo)"
+        continue
+      fi
+    fi
     ran=1
     phase "▸ $id — ${_TASK_DESC[$id]}"
-    "${_TASK_FN[$id]}" || warn "sub-task '$id' exited non-zero (continuing)."
+    if "${_TASK_FN[$id]}"; then
+      (( use_markers )) && touch "$marker"
+    else
+      warn "sub-task '$id' exited non-zero (continuing)."
+    fi
   done
   if [[ -n "$only" && "$ran" -eq 0 ]]; then err "No such sub-task: '$only'"; return 1; fi
   return 0
 }
+
+# ---- Startup config validation -------------------------------------------
+# Advisory pre-flight on config.sh: surfaces obvious foot-guns (missing
+# wordlists, an AI provider selected with no API key) loudly but does NOT
+# hard-fail — the kit degrades gracefully, this just stops silent surprises.
+validate_config() {
+  local issues=0
+  _vc_warn() { warn "config: $*"; issues=$((issues+1)); }
+
+  # Wordlists referenced by the web / dns / vhost phases.
+  [[ -s "${WEB_WORDLIST:-/nonexistent}" ]] || _vc_warn "WEB_WORDLIST not found ('${WEB_WORDLIST:-}') — content discovery will skip."
+  if [[ "${KIT_MODE:-internal}" == "external" ]]; then
+    [[ -s "${DNS_WORDLIST:-/nonexistent}" ]] || _vc_warn "DNS_WORDLIST not found ('${DNS_WORDLIST:-}') — active DNS brute will skip."
+  fi
+  if [[ -n "${VHOST_WORDLIST:-}" && ! -s "${VHOST_WORDLIST}" ]]; then
+    _vc_warn "VHOST_WORDLIST set but not found ('${VHOST_WORDLIST}') — vhost discovery will skip."
+  fi
+
+  # AI provider selected but its key is missing (ollama needs none).
+  case "${AI_PROVIDER:-none}" in
+    anthropic) [[ -n "${ANTHROPIC_API_KEY:-}" ]] || _vc_warn "AI_PROVIDER=anthropic but ANTHROPIC_API_KEY is empty — AI analysis will be skipped." ;;
+    openai)    [[ -n "${OPENAI_API_KEY:-}"    ]] || _vc_warn "AI_PROVIDER=openai but OPENAI_API_KEY is empty — AI analysis will be skipped." ;;
+    gemini)    [[ -n "${GEMINI_API_KEY:-}"    ]] || _vc_warn "AI_PROVIDER=gemini but GEMINI_API_KEY is empty — AI analysis will be skipped." ;;
+    ollama|none) : ;;
+    *) _vc_warn "AI_PROVIDER='${AI_PROVIDER}' is not one of none|anthropic|openai|gemini|ollama." ;;
+  esac
+
+  # Numeric sanity (cheap guard against typos like THREADS=).
+  [[ "${THREADS:-1}"  =~ ^[0-9]+$ ]] || _vc_warn "THREADS is not a number ('${THREADS:-}')."
+  [[ "${MIN_RATE:-1}" =~ ^[0-9]+$ ]] || _vc_warn "MIN_RATE is not a number ('${MIN_RATE:-}')."
+
+  if (( issues )); then
+    warn "config validation: $issues issue(s) above — continuing (the kit degrades gracefully)."
+  else
+    ok "config validation: OK"
+  fi
+  return 0
+}
+
+# ---- Tool inventory (single source of truth) ------------------------------
+# Provides kit_tools, shared by 00-setup.sh and the prep phases.
+source "$(dirname "${BASH_SOURCE[0]}")/tools.sh"
 
 # ---- AI analysis layer ----------------------------------------------------
 # Sourced last so every phase gets the ai_* helpers / bridges. No-ops unless

@@ -26,20 +26,29 @@ t_validate_scope() {
 }
 
 # ---- Sub-task: tool checks ---------------------------------------------------
+# Tool list comes from the single source of truth (lib/tools.sh / kit_tools), so
+# this preflight and 00-setup can never drift. Required tools hard-fail; optional
+# ones just warn (their phases skip gracefully).
 t_check_tools() {
-  log "Checking required tools"
-  local MISSING=() tool
-  for tool in nmap sudo; do
-    have "$tool" || MISSING+=("$tool")
-  done
-  if [[ ${#MISSING[@]} -gt 0 ]]; then
-    err "Missing required tools: ${MISSING[*]}"
+  log "Checking tools (source: lib/tools.sh)"
+  local bin apt hint flag missing_req=() missing_opt=()
+  while IFS=':' read -r bin apt hint flag; do
+    [[ -n "$bin" ]] || continue
+    have "$bin" && continue
+    if [[ "$flag" == "req" ]]; then missing_req+=("$bin"); else missing_opt+=("$bin"); fi
+  done < <(kit_tools internal)
+  # sudo is required for the privileged scans (sudo nmap -sS / masscan).
+  have sudo || missing_req+=("sudo")
+
+  if [[ ${#missing_req[@]} -gt 0 ]]; then
+    err "Missing REQUIRED tools: ${missing_req[*]}"
+    err "Install with: ./00-setup.sh"
     exit 1
   fi
-  for tool in masscan crackmapexec netexec impacket-secretsdump nuclei \
-              impacket-findDelegation; do
-    have "$tool" || warn "Optional tool not found: $tool (some phases will skip it)"
-  done
+  [[ ${#missing_opt[@]} -gt 0 ]] && warn "Optional tools missing (their phases will skip): ${missing_opt[*]}"
+  # Name-tolerant resolvers (handled outside kit_tools).
+  httpx_bin >/dev/null 2>&1 || warn "ProjectDiscovery httpx not found (install httpx-toolkit) — web fingerprint degrades."
+  nxc_bin   >/dev/null 2>&1 || warn "NetExec/CrackMapExec not found — SMB/AD enumeration degrades."
   ok "Tool check complete"
 }
 

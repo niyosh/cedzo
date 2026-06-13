@@ -18,6 +18,14 @@
 # Default to internal when a phase is launched standalone (run.sh sets this).
 KIT_MODE="${KIT_MODE:-internal}"
 
+# --- Local secrets / overrides (gitignored) --------------------------------
+# Keep CREDENTIALS and API KEYS out of this tracked file. If a `.env` exists
+# next to this config, it is sourced FIRST so anything it sets (DOMAIN, USERNAME,
+# PASSWORD, NTHASH, *_API_KEY, …) wins over the `${VAR:-default}` defaults below.
+# Copy .env.example to .env and fill it in. `.env` is in .gitignore.
+_ENV_FILE="$(dirname "${BASH_SOURCE[0]}")/.env"
+[[ -f "$_ENV_FILE" ]] && source "$_ENV_FILE"
+
 # --- Scope -----------------------------------------------------------------
 # One target per line. Comments (#) and blanks ignored.
 #   internal : an IP, range, or CIDR.

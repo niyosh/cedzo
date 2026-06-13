@@ -29,7 +29,9 @@ printf '10.10.10.0/24\n192.168.50.10-50\n' > scope.txt
 chmod +x *.sh lib/*.sh && ./00-setup.sh                 # internal toolset
 KIT_MODE=external ./00-setup.sh                          # external toolset
 
-# 3) (optional) edit config.sh — threads, wordlists, creds, AI
+# 3) (optional) tunables in config.sh (threads, wordlists, AI); put SECRETS
+#    (AD creds, API keys) in .env — it's gitignored and overrides config.sh:
+cp .env.example .env && $EDITOR .env
 
 # 4) Run — mode is the first argument (omit it and run.sh asks). run.sh then
 #    asks for a PROJECT name (or pass PROJECT=... in the environment).
@@ -40,16 +42,19 @@ KIT_MODE=external ./00-setup.sh                          # external toolset
 ./run.sh external menu            # interactive: pick a phase → a sub-task
 KIT_MODE=external PROJECT=acme ./run.sh   # mode + project via environment
 
-# Authenticated AD recon (internal; read-only creds; still no spraying/brute force):
+# Authenticated AD recon (internal; read-only creds in .env or env; no spraying):
 DOMAIN=CORP.LOCAL DC_IP=10.10.10.10 USERNAME=jdoe PASSWORD='Summer2025!' ./run.sh internal 03 06
 ```
 
 Output is namespaced by project: `reconoutput/<project>/<mode>/`
-(e.g. `reconoutput/acme/internal/`). **Runs resume per project** — re-using a
-project name skips phases whose `.done-NN` marker is present; a **new** project
-name starts a fresh scan from phase 01. Internal and external each get their own
-sub-dir, so they resume independently. Naming a phase explicitly re-runs it;
-delete the project dir to start that project over.
+(e.g. `reconoutput/acme/internal/`). Each project keeps its **own** scope at
+`reconoutput/<project>/scope.txt` (seeded once from the root `scope.txt`; edit it
+per-engagement). **Runs resume per project** — re-using a project name skips
+phases whose `.done-NN` marker is present, and within a partially-done phase
+resumes at the first unfinished **sub-task** (`.tasks/NN-<id>.done`). A **new**
+project name starts fresh from phase 01. Internal and external each get their own
+sub-dir, so they resume independently. Naming a phase explicitly re-runs it
+cleanly; delete the project dir to start that project over.
 
 ## Phases
 
@@ -137,6 +142,20 @@ Tunables live in `config.sh` under *AI augmentation*.
 - Collected hashes are for **offline** cracking, out of band (kit never tests them):
   `hashcat -m 13100` Kerberoast · `-m 18200` AS-REP · `-m 31300` Timeroast.
 - Credential attacks are out of scope: no spraying, brute force, poisoning/relay, or exploitation.
+- Secrets (AD creds, API keys) belong in `.env` (gitignored), not `config.sh`.
+
+## Development
+
+The external tool list has a single source of truth in [`lib/tools.sh`](lib/tools.sh)
+(`kit_tools`), consumed by both `00-setup.sh` and the prep-phase checks. Guardrails:
+
+```bash
+make check     # syntax (bash -n) + shellcheck + smoke (lists every phase's tasks, both modes)
+make lint      # shellcheck only      (skipped with a note if not installed)
+make smoke     # phase task-listing only
+```
+
+`tools/check.sh` runs the same checks without `make`. Good as a pre-commit hook.
 
 ## Licence
 
