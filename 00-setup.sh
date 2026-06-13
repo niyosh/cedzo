@@ -15,70 +15,70 @@ phase "Tool inventory (${KIT_MODE} mode)"
 
 # tool : apt-package : install hint (pipx package, or a go/manual hint; blank = apt/kali default)
 if [[ "$KIT_MODE" == "external" ]]; then
+  # External attack-surface recon — only tools the x0*-phases actually invoke.
   TOOLS=(
-    "nmap:nmap:"
-    "masscan:masscan:"
-    "whois:whois:"
-    "dig:dnsutils:"
-    "curl:curl:"
-    "jq:jq:"
-    "subfinder:subfinder:"
-    "amass:amass:"
-    "dnsx:dnsx:"
-    "nuclei:nuclei:"
-    "whatweb:whatweb:"
-    "feroxbuster:feroxbuster:"
-    "katana:katana:"
-    "gowitness:gowitness:"
-    "ffuf:ffuf:"
-    "wpscan:wpscan:"
-    "zaproxy:zaproxy:"
-    "testssl.sh:testssl.sh:"
-    "onesixtyone:onesixtyone:"
-    "showmount:nfs-common:"
-    "subzy::go install github.com/LukaSikic/subzy@latest"
-    "subjack::go install github.com/haccer/subjack@latest"
-    "noseyparker:noseyparker:"
-    "glow:glow:"
-    "python3:python3:"
-    "zip:zip:"
+    "nmap:nmap:"                 # x03 port/service scan, x07 TLS
+    "whois:whois:"              # x02 WHOIS/ASN
+    "dig:dnsutils:"             # x02 DNS records
+    "curl:curl:"                # x04 exposures, AI layer, ZAP API
+    "jq:jq:"                    # AI layer (lib/ai-ext.sh)
+    "subfinder:subfinder:"      # x02 subdomain enum
+    "amass:amass:"              # x02 subdomain enum
+    "dnsx:dnsx:"                # x02 resolution
+    "nuclei:nuclei:"            # x04/x07 vuln scan
+    "whatweb:whatweb:"          # x04 fingerprint
+    "feroxbuster:feroxbuster:"  # x04 content discovery
+    "katana:katana:"            # x04 crawl
+    "gowitness:gowitness:"      # x04 screenshots
+    "ffuf:ffuf:"                # x04 vhost discovery
+    "wpscan:wpscan:"            # x04 WordPress
+    "zaproxy:zaproxy:"          # x04 OWASP ZAP (spider/passive/active)
+    "testssl.sh:testssl.sh:"    # x07 TLS/SSL audit
+    "onesixtyone:onesixtyone:"  # x05/x07 SNMP
+    "showmount:nfs-common:"     # x05 NFS exposure
+    "subzy::go install github.com/LukaSikic/subzy@latest"   # x06 takeover
+    "subjack::go install github.com/haccer/subjack@latest"  # x06 takeover
+    "noseyparker:noseyparker:"  # x08 secret scan
+    "glow:glow:"                # markdown report rendering
+    "python3:python3:"          # reporting/* + xlsx
+    "zip:zip:"                  # x09 run archive
+    "tar:tar:"                  # x09 archive fallback
   )
 else
+  # Internal network recon — only tools the 0*-phases actually invoke.
   TOOLS=(
-    "nmap:nmap:"
-    "masscan:masscan:"
-    "fping:fping:"
-    "arp-scan:arp-scan:"
-    "enum4linux-ng:enum4linux-ng:"
-    "smbclient:smbclient:"
-    "rpcclient:samba-common-bin:"
-    "ldapsearch:ldap-utils:"
-    "nuclei:nuclei:"
-    "whatweb:whatweb:"
-    "feroxbuster:feroxbuster:"
-    "katana:katana:"
-    "gowitness:gowitness:"
-    "kerbrute:kerbrute:"
-    "bloodhound-python:bloodhound:bloodhound"
-    "GetUserSPNs.py:python3-impacket:impacket"
-    "certipy:python3-certipy:certipy-ad"
-    "showmount:nfs-common:"
-    "dig:dnsutils:"
-    "snmpwalk:snmp:"
-    "onesixtyone:onesixtyone:"
-    "rdpscan:rdpscan:"
-    "wpscan:wpscan:"
-    "zaproxy:zaproxy:"
-    "ffuf:ffuf:"
-    "curl:curl:"
-    "dnsrecon:dnsrecon:"
-    "ntlmrecon:ntlmrecon:"
-    "shortscan:shortscan:"
-    "noseyparker:noseyparker:"
-    "cmseek:cmseek:"
-    "glow:glow:"
-    "python3:python3:"
-    "zip:zip:"
+    "nmap:nmap:"                 # 02 port/service scan, 07 TLS/vuln NSE
+    "masscan:masscan:"          # 02 fast TCP discovery (optional)
+    "enum4linux-ng:enum4linux-ng:"  # 03 SMB/AD enumeration
+    "ldapsearch:ldap-utils:"    # 03 DC LDAP rootDSE / anon bind
+    "dnsrecon:dnsrecon:"        # 03 DNS std/SRV/AXFR
+    "nuclei:nuclei:"            # 04/07 vuln scan
+    "whatweb:whatweb:"          # 04 fingerprint
+    "feroxbuster:feroxbuster:"  # 04 content discovery
+    "katana:katana:"            # 04 crawl
+    "gowitness:gowitness:"      # 04 screenshots
+    "ffuf:ffuf:"                # 04 vhost discovery
+    "wpscan:wpscan:"            # 04 WordPress
+    "ntlmrecon:ntlmrecon:"      # 04 NTLM endpoint recon
+    "shortscan:shortscan:"      # 04 IIS 8.3 short-name disclosure
+    "cmseek:cmseek:"            # 04 CMS enum (optional, WEB_CMS=true)
+    "zaproxy:zaproxy:"          # 04 OWASP ZAP (spider/passive/active)
+    "curl:curl:"                # 04 exposures, AI layer, ZAP API
+    "jq:jq:"                    # AI layer (lib/ai.sh)
+    "kerbrute:kerbrute:"        # 06 user enum / AS-REP
+    "bloodhound-python:bloodhound:bloodhound"      # 06 BloodHound collection
+    "GetUserSPNs.py:python3-impacket:impacket"     # 06 Kerberoast/AS-REP (impacket)
+    "certipy:python3-certipy:certipy-ad"           # 06 ADCS enumeration
+    "showmount:nfs-common:"     # 03 NFS exports
+    "dig:dnsutils:"             # 03 DNS lookups
+    "snmpwalk:snmp:"            # 07 SNMP walk
+    "onesixtyone:onesixtyone:"  # 07 SNMP community discovery
+    "rdpscan:rdpscan:"          # 07 BlueKeep check
+    "noseyparker:noseyparker:"  # 08 secret scan
+    "glow:glow:"                # markdown report rendering
+    "python3:python3:"          # reporting/* + xlsx
+    "zip:zip:"                  # 09 run archive
+    "tar:tar:"                  # 09 archive fallback
   )
 fi
 
