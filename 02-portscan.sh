@@ -65,7 +65,7 @@ t_discover() {
     awk '/Ports:/{ip=$4; gsub(/.*Ports: /,""); print ip" "$0}' "$OUT/masscan.gnmap" 2>/dev/null \
       > "$OUT/open_raw.txt" || true
   else
-    run "$LOG" sudo nmap -sS -p- --min-rate "$MIN_RATE" -T"$NMAP_TIMING" \
+    run "$LOG" sudo nmap -sS -p- -Pn --min-rate "$MIN_RATE" -T"$NMAP_TIMING" \
       --open -iL "$LIVE" -oA "$OUT/full_tcp" || true
   fi
   build_map | sort -u > "$OUT/host_ports.txt"
@@ -84,8 +84,8 @@ t_service_scan() {
 # ---- Sub-task: top UDP (slow) ---------------------------------------------
 t_udp() {
   if [[ "$SKIP_UDP" != "true" ]]; then
-    log "Top-100 UDP scan (SNMP/DNS/NetBIOS/etc.)"
-    run "$LOG" sudo nmap -sU --top-ports 100 --open --min-rate "$((MIN_RATE/2))" \
+    log "Top-${UDP_TOP_PORTS:-500} UDP scan (SNMP/DNS/NetBIOS/etc.)"
+    run "$LOG" sudo nmap -sU --top-ports "${UDP_TOP_PORTS:-500}" -Pn --open --min-rate "$((MIN_RATE/2))" \
       -iL "$LIVE" -oA "$OUT/udp_top" || true
   else
     log "SKIP_UDP=true — skipping UDP scan."
@@ -134,7 +134,7 @@ t_classify() {
 
 task discover     "Full TCP discovery (masscan/nmap) -> host_ports.txt" t_discover
 task service_scan "Service/version + NSE on open ports (nmap -sCV)"     t_service_scan
-task udp          "Top-100 UDP scan (skipped if SKIP_UDP=true)"         t_udp
+task udp          "Top-${UDP_TOP_PORTS:-500} UDP scan (set SKIP_UDP=true to skip)" t_udp
 task classify     "Classify hosts by role + build web_urls.txt"         t_classify
 task ai           "AI: triage services + prioritise hosts"             ai_bridge_02
 run_tasks

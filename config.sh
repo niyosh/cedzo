@@ -43,14 +43,15 @@ if [[ "$KIT_MODE" == "external" ]]; then
   THREADS="${THREADS:-15}"        # parallel per-host tasks
   MIN_RATE="${MIN_RATE:-500}"     # nmap packet rate (KEEP LOW on the Internet)
   NMAP_TIMING="${NMAP_TIMING:-3}" # -T value (3 = polite; 4 = aggressive)
-  SKIP_UDP="${SKIP_UDP:-true}"    # external UDP is slow + often filtered
+  SKIP_UDP="${SKIP_UDP:-false}"   # UDP scan ON by default; set true to skip
 else
   THREADS="${THREADS:-20}"        # parallel per-host tasks
   MIN_RATE="${MIN_RATE:-2000}"    # nmap packet rate (lower if unstable links)
   NMAP_TIMING="${NMAP_TIMING:-4}" # -T value (4 = aggressive, 3 = polite)
-  SKIP_UDP="${SKIP_UDP:-false}"   # UDP scans are slow; set true to skip
+  SKIP_UDP="${SKIP_UDP:-false}"   # UDP scan ON by default; set true to skip
 fi
 MAX_RETRIES="${MAX_RETRIES:-2}"   # [external] nmap --max-retries (drop on lossy WAN)
+UDP_TOP_PORTS="${UDP_TOP_PORTS:-500}"  # nmap --top-ports for the UDP scan (both modes)
 
 # [external] Full TCP sweep of all 65535 ports by default (matches internal
 # mode, just rate-limited for the public Internet). Set TCP_FULL=false to fall
@@ -106,6 +107,19 @@ KATANA_DEPTH="${KATANA_DEPTH:-2}"       # katana crawl depth (raise for deeper a
 NUCLEI_SEVERITY="${NUCLEI_SEVERITY:-info,low,medium,high,critical}"
 NUCLEI_TIMEOUT="${NUCLEI_TIMEOUT:-10}"  # per-request timeout (s); guards fragile hosts
 NUCLEI_RATELIMIT="${NUCLEI_RATELIMIT:-100}"  # [external] global requests/sec cap (be gentle)
+
+# --- OWASP ZAP web scan (spider + passive + active) ------------------------
+# ZAP runs headless (daemon) and is driven over its REST API: per web root it
+# spiders, passively scans, and — if ZAP_ACTIVE=true — runs an ACTIVE scan that
+# sends attack payloads (XSS/SQLi/etc.). The active part is intrusive, so only
+# enable it with authorisation. Output: $RUN/04-web/zap/zap_report.html.
+ZAP_SCAN="${ZAP_SCAN:-true}"               # master toggle for the ZAP sub-task
+ZAP_ACTIVE="${ZAP_ACTIVE:-true}"           # run the active scan; false = spider + passive only
+ZAP_AJAX_SPIDER="${ZAP_AJAX_SPIDER:-false}"   # also run the AJAX spider (JS apps; needs a browser)
+ZAP_MAX_TARGETS="${ZAP_MAX_TARGETS:-10}"      # cap web roots fed to ZAP (active scan is slow)
+ZAP_SPIDER_TIMEOUT="${ZAP_SPIDER_TIMEOUT:-5}" # minutes: max spider time per target
+ZAP_ACTIVE_TIMEOUT="${ZAP_ACTIVE_TIMEOUT:-20}" # minutes: max active-scan time per target
+ZAP_PORT="${ZAP_PORT:-8090}"               # local daemon port (bound to 127.0.0.1)
 
 # --- Subdomain takeover + cloud --------------------------------------------
 # [external]

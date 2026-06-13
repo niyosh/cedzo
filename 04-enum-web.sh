@@ -211,17 +211,30 @@ t_nuclei() {
   ok "nuclei findings: $( [[ -f "$OUT/nuclei.txt" ]] && wc -l <"$OUT/nuclei.txt" || echo 0 )"
 }
 
+# ---- Sub-task: OWASP ZAP (spider + passive + active) ----------------------
+# Headless ZAP over the live web roots: spiders, passive-scans, and (unless
+# ZAP_ACTIVE=false) active-scans each target. See lib/zap.sh / config.sh.
+t_zap() {
+  zap_web_scan "$LIVE_URLS" "$OUT/zap"
+}
+
+# --- Task pipeline (passive identification -> discovery -> active scanning) -
+# Passive identification
 task fingerprint "Probe + fingerprint (httpx, whatweb, favicon)"      t_fingerprint
 task screenshots "Screenshot web roots (gowitness)"                   t_screenshots
+# Passive content / exposure checks
 task exposures   "Exposure checks (.git/.env/backups/status)"         t_exposures
 task wpscan      "WordPress passive deep-scan (wpscan)"               t_wpscan
 task ntlmrecon   "NTLM endpoint recon (internal AD info leak)"        t_ntlmrecon
 task shortscan   "IIS 8.3 short-name disclosure (shortscan)"          t_shortscan
 task cmseek      "CMS enumeration (CMSeeK; needs WEB_CMS=true)"        t_cmseek
+# Discovery / spidering
 task vhost       "Virtual-host discovery (ffuf; needs VHOST_WORDLIST)" t_vhost
 task crawl       "Crawl + content discovery -> nuclei_targets.txt"    t_crawl
+# Active vulnerability scanning
 task ai_triage   "AI: tech -> nuclei tags + URL triage"              ai_bridge_04
 task nuclei      "Web vuln scan (nuclei + AI-targeted pass)"         t_nuclei
+task zap         "OWASP ZAP spider + passive + active scan"           t_zap
 run_tasks
 
 ok "Web enumeration complete -> $OUT"

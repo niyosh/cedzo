@@ -116,3 +116,7 @@ if [[ "${KIT_MODE:-internal}" == "external" ]]; then
 else
   source "$(dirname "${BASH_SOURCE[0]}")/ai.sh"
 fi
+
+# ---- OWASP ZAP web-scan layer ---------------------------------------------
+# Provides zap_web_scan (spider + passive + active) for the web phases.
+source "$(dirname "${BASH_SOURCE[0]}")/zap.sh"

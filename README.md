@@ -11,11 +11,14 @@ Authorised reconnaissance, end to end, in two modes:
 You pick the mode when you launch `run.sh` (it asks, or take it as the first
 argument). Each mode writes to its own run directory, so the two never collide.
 
-> **Recon-only by design.** Discovery, enumeration, fingerprinting, and
-> non-exploitative vulnerability *detection* only — no exploitation, spraying,
-> brute force, relay, or disruptive actions. Use only against systems you are
-> explicitly authorised to test; `run.sh` requires a scope file and an
-> `AUTHORISED` confirmation before anything runs.
+> **Recon-only by design** — with one opt-in exception. Discovery, enumeration,
+> fingerprinting, and non-exploitative vulnerability *detection* only — no
+> spraying, brute force, relay, or disruptive actions. The **single intrusive
+> step** is the OWASP ZAP **active** scan in phase 04, which sends real attack
+> payloads (XSS/SQLi/etc.); it is gated behind `ZAP_ACTIVE` (set `ZAP_ACTIVE=false`
+> for spider + passive only). Use only against systems you are explicitly
+> authorised to test; `run.sh` requires a scope file and an `AUTHORISED`
+> confirmation before anything runs.
 
 ## Quick start
 
@@ -58,9 +61,9 @@ delete the project dir to start that project over.
 | # | Module | What it does |
 |---|--------|--------------|
 | 01 | prep | Validate scope, check tooling, build `live_hosts.txt` |
-| 02 | portscan | Full TCP + top UDP, `nmap -sCV`, classify by role, build `web_urls.txt` |
+| 02 | portscan | Full TCP `-p-` + top-500 UDP (`-Pn`, on by default), `nmap -sCV`, classify by role, build `web_urls.txt` |
 | 03 | smb-ad | SMB/shares/RID, GPP cpassword, anon-LDAP, DNS AXFR, NFS |
-| 04 | web | httpx/whatweb, gowitness, katana+feroxbuster crawl, exposures, wpscan, nuclei |
+| 04 | web | httpx/whatweb, gowitness, exposures, wpscan, katana+feroxbuster crawl, nuclei, **OWASP ZAP** (spider + passive + active) |
 | 05 | db | MSSQL/MySQL/PostgreSQL/Oracle/Mongo/Redis enum (no brute force) |
 | 06 | ad-recon | kerbrute, AS-REP/Kerberoast, BloodHound (optional `BLOODHOUND`), Certipy ADCS, delegation/SCCM, Timeroast |
 | 07 | vuln-scan | MS17-010, SMBGhost, BlueKeep, Zerologon, PrintNightmare, PetitPotam, log4j/ProxyShell, TLS, SNMP |
@@ -73,8 +76,8 @@ delete the project dir to start that project over.
 |---|--------|--------------|
 | 01 | prep | Validate + classify scope (IP/CIDR vs domain), check tooling, seed `live_hosts.txt` |
 | 02 | osint | WHOIS/ASN, DNS records, subdomain enum (subfinder/amass/crt.sh), reverse DNS, SPF/DKIM/DMARC; resolves names → folds public IPs into scope |
-| 03 | portscan | Rate-limited full TCP sweep `-p-` (set `TCP_FULL=false` for fast top-ports) + optional UDP, `nmap -sCV`, role classification, `web_urls.txt`, and `risky_services.txt` |
-| 04 | web | httpx/whatweb/favicon, gowitness, exposures, katana+feroxbuster crawl, wpscan, vhost, nuclei (+ AI-targeted pass) |
+| 03 | portscan | Rate-limited full TCP sweep `-p-` (set `TCP_FULL=false` for fast top-ports) + top-500 UDP (`-Pn`, on by default), `nmap -sCV`, role classification, `web_urls.txt`, and `risky_services.txt` |
+| 04 | web | httpx/whatweb/favicon, gowitness, exposures, wpscan, vhost, katana+feroxbuster crawl, nuclei (+ AI-targeted pass), **OWASP ZAP** (spider + passive + active) |
 | 05 | exposure | Internet-exposed RDP/SSH/VNC/WinRM, databases (info/empty-pass, no brute), FTP/SMB/NFS, edge/VPN appliance + admin-panel fingerprint, SNMP |
 | 06 | takeover-cloud | Dangling-CNAME + subdomain-takeover detection, S3/GCS/Azure bucket discovery, exposed `.git`/`.env` repos |
 | 07 | vuln-scan | nuclei CVE sweep, edge/VPN appliance CVE checks (Fortinet/Citrix/Pulse/F5/Exchange/…), TLS/SSL audit, SMTP open-relay |
@@ -131,9 +134,32 @@ falling back to the full list); every call is logged to the run dir's
 Sending client data to a cloud API needs authorisation — otherwise use Ollama.
 Tunables live in `config.sh` under *AI augmentation*.
 
+## OWASP ZAP web scan
+
+Phase 04 ends with a headless **OWASP ZAP** pass over the live web roots, driven
+entirely from the CLI (ZAP daemon + REST API — no GUI, no docker). Per target it
+runs **spider → passive scan → active scan**, then writes
+`04-web/zap/zap_report.html`, `zap_alerts.json`, and a `zap_summary.txt`
+risk tally. Needs the `zaproxy` package (`./00-setup.sh` checks for it).
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `ZAP_SCAN` | `true` | master toggle for the ZAP sub-task |
+| `ZAP_ACTIVE` | `true` | run the **active** (intrusive) scan; `false` = spider + passive only |
+| `ZAP_AJAX_SPIDER` | `false` | also run the AJAX spider (JS apps; needs a browser) |
+| `ZAP_MAX_TARGETS` | `10` | cap web roots fed to ZAP (active scan is slow) |
+| `ZAP_SPIDER_TIMEOUT` / `ZAP_ACTIVE_TIMEOUT` | `5` / `20` | per-target minute caps |
+| `ZAP_PORT` | `8090` | local daemon port (bound to `127.0.0.1`) |
+
+```bash
+ZAP_ACTIVE=false ./run.sh external 04     # spider + passive only (safe/baseline)
+ZAP_SCAN=false   ./run.sh internal 04     # skip ZAP entirely
+```
+
 ## Notes
 
 - Tune `THREADS` / `MIN_RATE` / `NMAP_TIMING` **down** on fragile links; `SKIP_UDP=true` for big scopes.
+- ZAP active scan is intrusive (sends payloads) and slow — narrow it with `ZAP_MAX_TARGETS` / timeouts, or `ZAP_ACTIVE=false`.
 - Collected hashes are for **offline** cracking, out of band (kit never tests them):
   `hashcat -m 13100` Kerberoast · `-m 18200` AS-REP · `-m 31300` Timeroast.
 - Credential attacks are out of scope: no spraying, brute force, poisoning/relay, or exploitation.

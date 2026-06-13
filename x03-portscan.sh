@@ -81,11 +81,11 @@ t_service_scan() {
 # ---- Sub-task: top UDP (optional; off by default externally) --------------
 t_udp() {
   if [[ "$SKIP_UDP" != "true" ]]; then
-    log "Top-50 UDP scan (DNS/SNMP/NTP/IKE/etc.)"
-    run "$LOG" nmap -sU --top-ports 50 --open --min-rate "$((MIN_RATE/2))" \
+    log "Top-${UDP_TOP_PORTS:-500} UDP scan (DNS/SNMP/NTP/IKE/etc.)"
+    run "$LOG" nmap -sU --top-ports "${UDP_TOP_PORTS:-500}" --open --min-rate "$((MIN_RATE/2))" \
       -Pn -iL "$LIVE" -oA "$OUT/udp_top" || true
   else
-    log "SKIP_UDP=true — skipping UDP scan (default for external)."
+    log "SKIP_UDP=true — skipping UDP scan."
   fi
 }
 
@@ -168,7 +168,7 @@ t_classify() {
 
 task discover     "TCP discovery (top-ports/full) -> host_ports.txt"  t_discover
 task service_scan "Service/version + NSE on open ports (nmap -sCV)"   t_service_scan
-task udp          "Top UDP scan (skipped if SKIP_UDP=true)"           t_udp
+task udp          "Top-${UDP_TOP_PORTS:-500} UDP scan (set SKIP_UDP=true to skip)" t_udp
 task classify     "Classify roles + risky exposures + web_urls.txt"   t_classify
 task ai           "AI: triage external services + exposures"          ai_bridge_03
 run_tasks
